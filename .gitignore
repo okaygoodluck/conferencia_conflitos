@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+.Python
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment Variables
+.env
+*.env
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# IDEs / Editors
+.vscode/
+.idea/
+
+# Custom Directories
+others/network_sniff/
+others/__pycache__/
+temp/
+
+# Data and archives
+*.csv
+*.jsonl
+*.zip
+*.tmp
+
+# Playwright & Node
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

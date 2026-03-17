@@ -1,0 +1,14 @@
+{
+  "name": "conferidor_conflitos",
+  "version": "1.0.0",
+  "description": "Aplicação local para verificar conflitos entre uma manobra base e todas as manobras **ELABORADAS (EB)** e **ENVIADAS PARA O CONDIS (EN)** em um período.",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.5.0"
+  }
+}
