@@ -6,50 +6,18 @@ O verificador identifica conflito quando existe interseção por:
 - Equipamentos
 - Alimentadores/Subestações (somente códigos completos, ex.: `CMN004`; ignora `CMN`)
 
-## Como usar (UX Web Local)
+## Novidades (Março 2026)
+- **Regra 22 (Inversão MA77/MA36):** Lógica específica para Reguladores de Tensão (RTs).
+- **Cache Local:** Fallback automático para a pasta `%TEMP%` em caso de falha de permissão na rede.
+- **Limpeza Deep:** Limpeza automática de resíduos de scripts JSF no scraper.
+- **Regra 24:** Validação rigorosa de recursos (CI, EQUIPES, GMT, GBT, MJ, LV, DI).
 
-1) Execute o arquivo `start_local.bat`
-2) Abra o navegador em `http://127.0.0.1:8765/` (abre automaticamente)
-3) Preencha:
-   - Manobra base
-   - Data início / data fim
-   - Usuário / senha
-4) Clique em **Iniciar**
-5) Acompanhe o progresso/ETA e exporte CSV ao final
+## Como usar
+1) Execute `iniciar_verificador_regras.bat`
+2) O sistema abrirá em `http://127.0.0.1:8766/`
+3) Informe a manobra e as credenciais.
 
-## Regras de comparação
-
-### Equipamentos
-- Comparação por string normalizada completa.
-- Ex.: `22 - 55134` é diferente de `28 - 55134`.
-- Padronização: espaços e hífens (`\\s*-\\s*` -> ` - `).
-
-### Alimentadores/Subestações
-- Padronização: maiúsculo e remove espaços.
-- Ex.: `RPA 014` e `RPA014` viram `RPA014`.
-- Apenas códigos completos `^[A-Z]{3,6}\\d{2,4}$` entram na comparação.
-- Ex.: considera `CMN004`, ignora `CMN`.
-
-## Variáveis de ambiente (opcional)
-
-Veja o exemplo em `.env.example`.
-
-- `GDIS_PORT` (default `8765`): porta do servidor local
-- `GDIS_HTTP_TIMEOUT` (default `60`): timeout por requisição HTTP ao GDIS
-
-## Scripts
-
-**Produção**
-- `app_local.py`: servidor local (localhost)
-- `verificador_conflitos.py`: motor do verificador
-- `gdis_http_extrator.py`: extrator HTTP/JSF/A4J (sem UI)
-
-**Testes/Legado**
-- `gdis_pesquisas.py`
-- `gdis_manobra_debug.py`
-- `verificador_elaboradas.py`
-
-## Segurança
-
-- Não salvar senha em arquivo.
-- Não versionar `.env`.
+## Estrutura do Projeto
+- `src/core`: Lógica de verificação e regras.
+- `src/api`: APIs locais (Flask).
+- `src/integration`: Extratores de dados (HTTP/Playwright).

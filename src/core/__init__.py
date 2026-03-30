@@ -1,0 +1,3 @@
+from .verificador_regras_solicitacao import VerificadorRegrasSolicitacao
+from .verificador_conflitos import VerificadorConflitos
+from .verificador_elaboradas import VerificadorElaboradas
