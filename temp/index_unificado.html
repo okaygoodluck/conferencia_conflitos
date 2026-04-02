@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plataforma Integrada de Manobras GDIS</title>
+    <link rel="icon" type="image/x-icon" href="/assets/icon_light.ico" />
+    <style>
+        :root {
+            --bg: #0b1020;
+            --surface: #0f1730;
+            --card: #101b3a;
+            --border: rgba(255, 255, 255, 0.10);
+            --text: rgba(255, 255, 255, 0.92);
+            --muted: rgba(255, 255, 255, 0.60);
+            --focus: #6ea8fe;
+            --accent: #51d88a;
+            --danger: #ff5d5d;
+            --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            --radius: 14px;
+            --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --mono: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--sans);
+            margin: 0;
+            background: radial-gradient(circle at 20% 20%, rgba(110, 168, 254, 0.15), transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(81, 216, 138, 0.08), transparent 40%),
+                var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+
+        header img {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 26px;
+            margin: 0;
+            letter-spacing: -0.5px;
+        }
+
+        /* TABS */
+        .tabs-nav {
+            display: flex;
+            gap: 5px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 5px;
+            border-radius: var(--radius);
+            margin-bottom: 25px;
+            border: 1px solid var(--border);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 10px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 14px;
+        }
+
+        .tab-btn.active {
+            background: var(--focus);
+            color: var(--bg);
+            box-shadow: 0 4px 15px rgba(110, 168, 254, 0.3);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* GLASS CARD */
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 30px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 20px;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .col-4 {
+            grid-column: span 4;
+        }
+
+        .col-6 {
+            grid-column: span 6;
+        }
+
+        .col-12 {
+            grid-column: span 12;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--muted);
+            letter-spacing: 0.5px;
+        }
+
+        input {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+            padding: 12px 15px;
+            border-radius: 8px;
+            color: white;
+            outline: none;
+            transition: border 0.2s;
+            font-size: 14px;
+        }
+
+        input:focus {
+            border-color: var(--focus);
+            box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+        }
+
+        .checkgrid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.15);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .checkitem {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .checkitem input {
+            cursor: pointer;
+            accent-color: var(--focus);
+            width: 16px;
+            height: 16px;
+        }
+
+        .btn {
+            padding: 14px 25px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: var(--focus);
+            color: var(--bg);
+            border: none;
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.1);
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* RESULTS */
+        .terminal {
+            background: #05070a;
+            border-radius: 10px;
+            border: 1px solid #1a1f2e;
+            padding: 20px;
+            color: #d4d4d4;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.6;
+            height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 20px;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 20px;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .status-pill {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .pill-running {
+            background: #f39c12;
+            color: #fff;
+        }
+
+        .pill-done {
+            background: var(--accent);
+            color: #0b1020;
+        }
+
+        .pill-error {
+            background: var(--danger);
+            color: #fff;
+        }
+
+        .summary-bar {
+            background: rgba(110, 168, 254, 0.05);
+            border: 1px solid rgba(110, 168, 254, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 13px;
+        }
+
+        /* REGRAS REPORT */
+        .report-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .phase-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .phase-header {
+            background: rgba(255, 255, 255, 0.04);
+            padding: 12px 20px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--focus);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+            user-select: none;
+        }
+
+        .phase-header:hover {
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .phase-header::after {
+            content: '▾';
+            font-size: 18px;
+            transition: transform 0.3s;
+            opacity: 0.5;
+        }
+
+        .phase-card.collapsed .phase-header::after {
+            transform: rotate(-90deg);
+        }
+
+        .phase-card.collapsed .phase-header {
+            border-bottom-color: transparent;
+        }
+
+        .rule-list {
+            padding: 10px 0;
+            transition: max-height 0.3s ease-out, opacity 0.2s;
+            opacity: 1;
+        }
+
+        .phase-card.collapsed .rule-list {
+            max-height: 0;
+            padding: 0;
+            overflow: hidden;
+            opacity: 0;
+        }
+
+        .rule-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            transition: background 0.2s;
+        }
+
+        .rule-item:last-child {
+            border-bottom: none;
+        }
+
+        .rule-item:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .rule-status {
+            font-size: 16px;
+            margin-top: -2px;
+        }
+
+        .rule-text {
+            font-size: 13px;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.85);
+            flex: 1;
+        }
+
+        .rule-item.fail .rule-text {
+            color: var(--danger);
+            font-weight: 500;
+        }
+
+        .rule-item.warn .rule-text {
+            color: #f39c12;
+        }
+
+        .summary-dashboard {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .summary-stat {
+            flex: 1;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 24px;
+            font-weight: 800;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--muted);
+            letter-spacing: 1px;
+        }
+
+        .stat-ok {
+            border-color: rgba(81, 216, 138, 0.2);
+            background: rgba(81, 216, 138, 0.05);
+        }
+
+        .stat-ok .stat-val {
+            color: var(--accent);
+        }
+
+        .stat-fail {
+            border-color: rgba(255, 93, 93, 0.2);
+            background: rgba(255, 93, 93, 0.05);
+        }
+
+        .stat-fail .stat-val {
+            color: var(--danger);
+        }
+
+        .stat-warn {
+            border-color: rgba(243, 156, 18, 0.2);
+            background: rgba(243, 156, 18, 0.05);
+        }
+
+        .stat-warn .stat-val {
+            color: #f39c12;
+        }
+
+        .btn-toggle-log {
+            font-size: 11px;
+            color: var(--muted);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+            margin-top: 10px;
+        }
+
+        .btn-toggle-log:hover {
+            color: var(--focus);
+        }
+
+        .disclaimer-inline {
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.4;
+            flex: 1;
+            text-align: left;
+            padding-left: 20px;
+            border-left: 1px solid var(--border);
+            margin-left: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <img src="/assets/icon_light.png" alt="Logo">
+            <div>
+                <h1>Plataforma Integrada GDIS</h1>
+                <p style="color: var(--muted); font-size: 12px; margin: 4px 0 0 0;">Verificador de Conflitos & Validação
+                    de Regras</p>
+            </div>
+        </header>
+
+        <nav class="tabs-nav">
+            <button class="tab-btn active" onclick="showTab('conflitos', this)">🔌 Conflitos entre Manobras</button>
+            <button class="tab-btn" onclick="showTab('regras', this)">📜 Validação de Regras Base</button>
+        </nav>
+
+        <!-- TELA: CONFLITOS -->
+        <div id="tab-conflitos" class="tab-content active">
+            <section class="card">
+                <form id="form-conflitos">
+                    <div class="grid">
+                        <div class="field col-4">
+                            <label>Manobra Base (Opcional)</label>
+                            <input type="text" id="conf-manobra" placeholder="Ex: 239130082">
+                        </div>
+                        <div class="field col-4">
+                            <label>Data Início</label>
+                            <input type="text" id="conf-di" required placeholder="01/03/2026" maxlength="10">
+                        </div>
+                        <div class="field col-4">
+                            <label>Data Fim</label>
+                            <input type="text" id="conf-df" required placeholder="30/03/2026" maxlength="10">
+                        </div>
+                        <div class="field col-6">
+                            <label>Usuário GDIS</label>
+                            <input type="text" class="shared-user" id="conf-user" required placeholder="Colaborador">
+                        </div>
+                        <div class="field col-6">
+                            <label>Senha GDIS</label>
+                            <input type="password" class="shared-pass" id="conf-pass" required>
+                        </div>
+                        <div class="field col-6">
+                            <label>Equipamentos Específicos</label>
+                            <input type="text" id="conf-eq-manual" placeholder="Ex: 24-83300, 22-12345">
+                        </div>
+                        <div class="field col-6">
+                            <label>Alimentadores Específicos</label>
+                            <input type="text" id="conf-al-manual" placeholder="Ex: ERN01, EST02">
+                        </div>
+                        <div class="field col-12">
+                            <label>Situações para Verificação</label>
+                            <div class="checkgrid">
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EB" checked> EB
+                                    (Elaborada)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EN" checked> EN
+                                    (Enviada)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="CO"> CO
+                                    (Completa)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EA"> EA
+                                    (Análise)</label>
+                            </div>
+                        </div>
+                        <div class="field col-12">
+                            <label>Filtrar por Malhas</label>
+                            <div class="checkgrid">
+                                <label class="checkitem"><input type="checkbox" name="mal" value="CN"> CN -
+                                    Centro</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="LE"> LE -
+                                    Leste</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="MQ"> MQ -
+                                    Mantiqueira</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="NT"> NT -
+                                    Norte</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="SU"> SU - Sul</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="TA"> TA -
+                                    Triângulo</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 30px; display: flex; align-items: center; gap: 15px;">
+                        <button type="submit" id="btn-conf-start" class="btn btn-primary">🚀 Iniciar
+                            Verificação</button>
+                        <button type="button" id="btn-conf-cancel" class="btn btn-outline" disabled>Parar</button>
+                        <a id="lnk-conf-export" href="#" class="btn btn-outline"
+                            style="display:none; text-decoration: none;">⬇ Exportar CSV</a>
+                        <div class="disclaimer-inline">
+                            ⚠️ ESTA FERRAMENTA ATUA COMO APOIO ÀS SUAS ATIVIDADES OPERACIONAIS. A CONFERÊNCIA E VALIDAÇÃO
+                            DAS INFORMAÇÕES CONTINUAM SENDO DE RESPONSABILIDADE DO USUÁRIO.
+                        </div>
+                    </div>
+                </form>
+            </section>
+
+            <section id="pane-conf-status" class="card" style="display:none;">
+                <div id="txt-conf-main" style="font-weight: 700; font-size: 16px;"></div>
+                <div id="txt-conf-small" style="color: var(--muted); font-size: 13px; margin-top: 10px;"></div>
+                <button type="button" class="btn-toggle-log" onclick="toggleConfLog()">Exibir Log Técnico</button>
+                <section id="pane-conf-terminal" class="terminal"
+                    style="display:none; margin-top:15px; font-size: 11px; height: 300px;"></section>
+            </section>
+
+            <section id="pane-conf-results" class="card" style="display:none;">
+                <div id="conf-summary-bar" class="summary-bar"></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Manobra</th>
+                            <th>Situações</th>
+                            <th>Equipamentos</th>
+                            <th>Alimentadores</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbl-conf-body"></tbody>
+                </table>
+            </section>
+        </div>
+
+        <!-- TELA: REGRAS -->
+        <div id="tab-regras" class="tab-content">
+            <section class="card">
+                <form id="form-regras">
+                    <div class="grid">
+                        <div class="field col-12">
+                            <label>Número da Manobra Base</label>
+                            <input type="text" id="reg-manobra" required placeholder="Digite o número da manobra">
+                        </div>
+                        <div class="field col-6">
+                            <label>Usuário GDIS</label>
+                            <input type="text" class="shared-user" id="reg-user" required>
+                        </div>
+                        <div class="field col-6">
+                            <label>Senha GDIS</label>
+                            <input type="password" class="shared-pass" id="reg-pass" required>
+                        </div>
+                    </div>
+                    <div style="margin-top: 30px; display: flex; align-items: center; gap: 15px;">
+                        <button type="submit" id="btn-reg-start" class="btn btn-primary">🔍 Analisar Regras
+                            GDIS</button>
+                        <span id="reg-status-badge" class="status-pill" style="display:none;"></span>
+                        <div class="disclaimer-inline">
+                            ⚠️ ESTA FERRAMENTA ATUA COMO APOIO ÀS SUAS ATIVIDADES OPERACIONAIS. AINDA ASSIM, A CONFERÊNCIA
+                            E VALIDAÇÃO DAS INFORMAÇÕES CONTINUAM SENDO DE RESPONSABILIDADE DO USUÁRIO, VISTO QUE NEM
+                            TODOS OS CENÁRIOS PODEM SER INTEGRALMENTE COBERTOS PELA FERRAMENTA.
+                        </div>
+                    </div>
+                </form>
+            </section>
+
+            <section id="pane-reg-results" style="display:none; margin-top:20px;">
+                <div id="reg-summary-dash" class="summary-dashboard"></div>
+                <div id="reg-report-content" class="report-container"></div>
+                <button type="button" class="btn-toggle-log" onclick="toggleRegLog()">Exibir Log Técnico</button>
+                <section id="pane-reg-terminal" class="terminal"
+                    style="display:none; margin-top:15px; font-size: 11px; height: 300px;"></section>
+        </div>
+
+    </div>
+    </div>
+
+    <script>
+        let confJobId = null, regJobId = null;
+        let confTimer = null, regTimer = null;
+
+        // --- SISTEMA DE ABAS ---
+        function showTab(id, btn) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            document.getElementById('tab-' + id).classList.add('active');
+        }
+
+        // Sincronização de User/Pass
+        document.querySelectorAll('.shared-user').forEach(el => {
+            el.addEventListener('input', (e) => document.querySelectorAll('.shared-user').forEach(x => x.value = e.target.value));
+        });
+        document.querySelectorAll('.shared-pass').forEach(el => {
+            el.addEventListener('input', (e) => document.querySelectorAll('.shared-pass').forEach(x => x.value = e.target.value));
+        });
+
+        // Máscara de Data
+        function maskDate(e) {
+            let v = e.target.value.replace(/\D/g, '').slice(0, 8);
+            if (v.length > 4) v = v.slice(0, 2) + '/' + v.slice(2, 4) + '/' + v.slice(4);
+            else if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
+            e.target.value = v;
+        }
+        document.getElementById('conf-di').oninput = maskDate;
+        document.getElementById('conf-df').oninput = maskDate;
+
+        // --- LÓGICA CONFLITOS ---
+        document.getElementById('form-conflitos').onsubmit = async (e) => {
+            e.preventDefault();
+            const sit = Array.from(document.querySelectorAll('input[name="sit"]:checked')).map(x => x.value).join(',');
+            const mal = Array.from(document.querySelectorAll('input[name="mal"]:checked')).map(x => x.value).join(',');
+
+            const params = new URLSearchParams();
+            params.set('manobra', document.getElementById('conf-manobra').value);
+            params.set('di', document.getElementById('conf-di').value);
+            params.set('df', document.getElementById('conf-df').value);
+            params.set('user', document.getElementById('conf-user').value);
+            params.set('pass', document.getElementById('conf-pass').value);
+            params.set('equipamentos', document.getElementById('conf-eq-manual').value);
+            params.set('alimentadores', document.getElementById('conf-al-manual').value);
+            params.set('situacoes', sit);
+            params.set('malhas', mal);
+
+            document.getElementById('btn-conf-start').disabled = true;
+            document.getElementById('btn-conf-cancel').disabled = false;
+            document.getElementById('pane-conf-status').style.display = 'block';
+            document.getElementById('pane-conf-results').style.display = 'none';
+            document.getElementById('pane-conf-terminal').style.display = 'none';
+            document.getElementById('pane-conf-terminal').textContent = "";
+            document.getElementById('txt-conf-main').textContent = "Iniciando processamento...";
+
+            const res = await fetch('/conflitos/start', { method: 'POST', body: params });
+            const data = await res.json();
+            confJobId = data.job_id;
+            clearInterval(confTimer);
+            confTimer = setInterval(pollConf, 1000);
+        };
+
+        async function pollConf() {
+            const res = await fetch('/conflitos/status?job_id=' + confJobId);
+            const data = await res.json();
+
+            const term = document.getElementById('pane-conf-terminal');
+            if (data.log) {
+                term.textContent = data.log;
+                term.scrollTop = term.scrollHeight;
+            }
+
+            if (data.state === 'running') {
+                document.getElementById('txt-conf-main').innerHTML = `⚙️ Processando: <span style="color:var(--focus)">${data.processed}</span> / ${data.total}`;
+                document.getElementById('txt-conf-small').textContent = `Conflitos: ${data.conflitos} | Falhas: ${data.falhas} | Tempo: ${data.elapsed} | ETA: ${data.eta}`;
+            } else if (data.state === 'done') {
+                clearInterval(confTimer);
+                document.getElementById('btn-conf-start').disabled = false;
+                document.getElementById('btn-conf-cancel').disabled = true;
+                const rRes = await fetch('/conflitos/result?job_id=' + confJobId);
+                const rData = await rRes.json();
+                showConfResults(rData);
+            } else if (data.state === 'error') {
+                clearInterval(confTimer);
+                document.getElementById('txt-conf-main').innerHTML = `<span style="color:var(--danger)">❌ Erro: ${data.error}</span>`;
+                document.getElementById('btn-conf-start').disabled = false;
+            }
+        }
+
+        function showConfResults(data) {
+            document.getElementById('pane-conf-status').style.display = 'none';
+            document.getElementById('pane-conf-results').style.display = 'block';
+            const sourceInfo = data.base ? `Manobra ${data.base}` : `Busca Direta por Equipamentos/Alimentadores`;
+            document.getElementById('conf-summary-bar').textContent = `Resultados para ${sourceInfo}: ${data.conflitos.length} conflitos encontrados em ${data.total_unico_sem_base} manobras analisadas (${data.elapsed}).`;
+
+            const tbody = document.getElementById('tbl-conf-body');
+            tbody.innerHTML = '';
+            data.conflitos.forEach(c => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td><b>${c.manobra}</b></td><td>${c.situacoes.join(', ')}</td><td>${c.equipamentos.join('; ')}</td><td>${c.alimentadores.join('; ')}</td>`;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('lnk-conf-export').href = `/conflitos/export?job_id=${confJobId}`;
+            document.getElementById('lnk-conf-export').style.display = 'inline-block';
+        }
+
+        // --- LÓGICA REGRAS ---
+        document.getElementById('form-regras').onsubmit = async (e) => {
+            e.preventDefault();
+            const payload = {
+                manobra: document.getElementById('reg-manobra').value,
+                usuario: document.getElementById('reg-user').value,
+                senha: document.getElementById('reg-pass').value
+            };
+
+            document.getElementById('btn-reg-start').disabled = true;
+            document.getElementById('pane-reg-results').style.display = 'block';
+            document.getElementById('reg-report-content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--muted);"><span style="display:block; font-size:30px; margin-bottom:15px;">🚀</span> Iniciando Robô Web e simulando login GDIS...</div>';
+            document.getElementById('reg-summary-dash').innerHTML = '';
+            document.getElementById('pane-reg-terminal').style.display = 'none';
+            document.getElementById('pane-reg-terminal').textContent = "";
+
+            const badge = document.getElementById('reg-status-badge');
+            badge.style.display = 'inline-block';
+            badge.className = 'status-pill pill-running';
+            badge.textContent = 'Executando';
+
+            const res = await fetch('/regras/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            regJobId = data.job_id;
+            clearInterval(regTimer);
+            regTimer = setInterval(pollReg, 1000);
+        };
+
+        function toggleRegLog() {
+            const t = document.getElementById('pane-reg-terminal');
+            t.style.display = t.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleConfLog() {
+            const t = document.getElementById('pane-conf-terminal');
+            t.style.display = t.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function pollReg() {
+            const res = await fetch('/regras/status?job_id=' + regJobId);
+            const data = await res.json();
+            const term = document.getElementById('pane-reg-terminal');
+
+            if (data.log) {
+                term.textContent = data.log;
+                term.scrollTop = term.scrollHeight;
+                renderRegResults(data.log);
+            }
+
+            if (data.state === 'done') {
+                clearInterval(regTimer);
+                document.getElementById('btn-reg-start').disabled = false;
+                const badge = document.getElementById('reg-status-badge');
+                badge.className = 'status-pill pill-done';
+                badge.textContent = 'Concluído';
+            } else if (data.state === 'error') {
+                clearInterval(regTimer);
+                document.getElementById('btn-reg-start').disabled = false;
+                const badge = document.getElementById('reg-status-badge');
+                badge.className = 'status-pill pill-error';
+                badge.textContent = 'Erro';
+                renderRegResults(data.log + "\n\n❌ ERRO FATAL: " + data.error);
+            }
+        }
+
+        function renderRegResults(log) {
+            const content = document.getElementById('reg-report-content');
+            const dash = document.getElementById('reg-summary-dash');
+            const lines = log.split('\n');
+
+            let html = '';
+            let currentPhase = null;
+            let ruleItems = [];
+
+            let stats = { ok: 0, fail: 0, warn: 0 };
+
+            lines.forEach(line => {
+                const l = line.trim();
+                if (!l) return;
+
+                // Detecta Fase
+                if (l.includes('FASE')) {
+                    if (currentPhase) {
+                        html += buildPhaseCard(currentPhase, ruleItems);
+                    }
+                    currentPhase = l.replace(/===/g, '').trim();
+                    ruleItems = [];
+                }
+                // Detecta Regra
+                else if (l.includes('REGRA')) {
+                    const isOk = l.includes('✅') || l.includes('OK');
+                    const isFail = l.includes('❌') || l.includes('FALHA');
+                    const isWarn = l.includes('⚠️') || l.includes('ALERTA');
+
+                    let statusIcon = '🔵';
+                    let statusClass = '';
+                    if (isOk) { statusIcon = '✅'; statusClass = 'ok'; stats.ok++; }
+                    else if (isFail) { statusIcon = '❌'; statusClass = 'fail'; stats.fail++; }
+                    else if (isWarn) { statusIcon = '⚠️'; statusClass = 'warn'; stats.warn++; }
+
+                    const ruleText = l.replace(/✅|❌|⚠️|OK|FALHA|ALERTA|===/g, '').replace('REGRA', '<b>REGRA</b>').trim();
+                    ruleItems.push(`<div class="rule-item ${statusClass}"><span class="rule-status">${statusIcon}</span><span class="rule-text">${ruleText}</span></div>`);
+                }
+                // Detecta Sumário Final
+                else if (l.includes('APROVADOS') && l.includes('FALHAS')) {
+                    const match = l.match(/(\d+)\s+APROVADOS\s+\|\s+(\d+)\s+FALHAS\s+\|\s+(\d+)\s+ALERTAS/);
+                    if (match) {
+                        stats.ok = parseInt(match[1]);
+                        stats.fail = parseInt(match[2]);
+                        stats.warn = parseInt(match[3]);
+                    }
+                }
+                // Detecta Erro Fatal
+                else if (l.includes('ERRO FATAL')) {
+                    ruleItems.push(`<div class="rule-item fail"><span class="rule-status">❌</span><span class="rule-text"><b>ERRO SISTÊMICO:</b> ${l.split('ERRO FATAL:')[1]}</span></div>`);
+                }
+            });
+
+            if (currentPhase) html += buildPhaseCard(currentPhase, ruleItems);
+
+            if (html) {
+                content.innerHTML = html;
+                dash.innerHTML = `
+                    <div class="summary-stat stat-ok"><span class="stat-val">${stats.ok}</span><span class="stat-label">Aprovados</span></div>
+                    <div class="summary-stat stat-fail"><span class="stat-val">${stats.fail}</span><span class="stat-label">Falhas</span></div>
+                    <div class="summary-stat stat-warn"><span class="stat-val">${stats.warn}</span><span class="stat-label">Alertas</span></div>
+                `;
+            }
+        }
+
+        function togglePhase(header) {
+            const card = header.parentElement;
+            card.classList.toggle('collapsed');
+        }
+
+        function buildPhaseCard(title, items) {
+            if (items.length === 0) return '';
+            // Iniciamos todas expandidas (sem a classe .collapsed)
+            return `
+                <div class="phase-card">
+                    <div class="phase-header" onclick="togglePhase(this)">${title}</div>
+                    <div class="rule-list">${items.join('')}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+
+</html>
