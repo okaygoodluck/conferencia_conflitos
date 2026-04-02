@@ -11,6 +11,11 @@ Thumbs.db
 
 # Logs
 *.log
+atividades.log
+
+# Certeficates
+data/server.crt
+data/server.key
 
 # Environment Variables
 .env
