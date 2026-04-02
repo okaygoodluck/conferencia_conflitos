@@ -1,54 +1,31 @@
 # Guia de Configuração do Servidor GDIS
 
-Este guia orienta a migração da Plataforma GDIS para uma máquina dedicada (Servidor Local).
+Este documento descreve como configurar o servidor central para que toda a equipe possa acessar a Plataforma GDIS.
 
----
+## Pré-requisitos
+1.  Python instalado (versão 3.8+).
+2.  Acesso à rede corporativa.
+3.  Permissão para abrir a porta 8765 no firewall do servidor.
 
-## 1. Requisitos da Máquina (Servidor)
-- **Sistema Operacional:** Windows 10/11 ou Server.
-- **Python:** Versão 3.10 ou superior instalada e no PATH.
-- **Rede:** IP fixo na rede interna ou um nome de rede (hostname) estável.
-- **Acesso:** Permissão para abrir a porta **8765** no Firewall.
+## Passo a Passo
 
-## 2. Passo a Passo da Instalação
+1.  **Configuração da Pasta**:
+    *   Mova a pasta do projeto para o local definitivo no servidor (ex: `C:\Transmissao\Plataforma_GDIS`).
+2.  **Instalação**:
+    *   Execute `Instalar_Requirements.bat` para garantir que todas as bibliotecas (incluindo `cryptography` para o HTTPS) estejam presentes.
+3.  **Inicialização**:
+    *   Execute `iniciar_plataforma_gdis.bat`.
+    *   **Nota**: O console do servidor permanecerá visível para monitoramento. Não o feche.
+4.  **Distribuição**:
+    *   Edite o arquivo `Atalho_Plataforma_GDIS_TEMPLATE.url` com o IP real do servidor.
+    *   Distribua o atalho gerado para os membros da equipe.
 
-### Passo A: Copiar o Projeto
-Copie toda a pasta `conferidor_conflitos` para o servidor (ex: `C:\GDIS_Platform\`).
+### ⚠️ Aviso Importante: Certificado Autoassinado (HTTPS)
+Como a plataforma agora utiliza **HTTPS** com um certificado autoassinado para garantir a segurança dos dados na rede:
+*   Ao acessar pela primeira vez, o navegador exibirá um alerta: **"Sua conexão não é particular"**.
+*   **Ação**: Clique em **"Avançado"** e depois em **"Ir para [IP] (não seguro)"**.
+*   Isso é esperado e ocorre porque o certificado foi gerado localmente, mas a conexão continuará sendo criptografada e segura.
 
-### Passo B: Instalar Dependências
-No servidor, abra o terminal na pasta do projeto e execute:
-```powershell
-.\Instalar_Requirements.bat
-```
-*(Isso vai instalar o Python localmente na pasta `python_portable` e as bibliotecas necessárias).*
-
-### Passo C: Instalar o Navegador Robô
-No mesmo terminal, execute:
-```powershell
-.\python_portable\python.exe -m playwright install chromium
-```
-
-### Passo D: Abrir o Firewall
-É necessário permitir que outras máquinas acessem a porta 8765.
-1. Vá em **Firewall do Windows** -> **Configurações Avançadas**.
-2. **Regras de Entrada** -> **Nova Regra**.
-3. Escolha **Porta** -> **TCP** -> **Portas locais específicas: 8765**.
-4. **Permitir a conexão**.
-5. Dê o nome: `GDIS_Plataforma_8765`.
-
-## 3. Iniciando o Servidor
-Basta executar o arquivo:
-```powershell
-.\iniciar_plataforma_gdis.bat
-```
-A tela do prompt **ficará aberta e visível** no servidor, exibindo os logs de acesso e o status da plataforma. **Não feche esta janela**, pois ela é o motor do sistema.
-
----
-
-## 4. Como os usuários vão acessar?
-
-Agora, em qualquer outra máquina da rede, basta abrir o navegador e digitar:
-`http://[IP-DO-SERVIDOR]:8765/`
-
-> [!TIP]
-> Me informe o **IP do Servidor** (ou o nome da máquina) para que eu possa gerar um arquivo de atalho (.url) pronto para você distribuir para a equipe.
+## Monitoramento de Atividade
+O console do servidor deve permanecer aberto. Todas as atividades (usuário, job, sucessos e erros) serão registradas em:
+`./data/atividades.log`
