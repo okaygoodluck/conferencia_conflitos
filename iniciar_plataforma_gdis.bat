@@ -12,7 +12,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [2/3] Verificando Dependencias...
-python -c "import playwright, pandas, openpyxl" >nul 2>&1
+python -c "import playwright, pandas, openpyxl, cryptography" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [AVISO] Algumas bibliotecas estao faltando. Tentando instalar...
     python -m pip install -r requirements.txt
@@ -28,5 +28,5 @@ call ENCERRAR_SILENCIOSO.bat
 start "Plataforma GDIS" python -m src.api.app_unificado
 
 timeout /t 3 /nobreak >nul
-start "" "http://127.0.0.1:%GDIS_PORT%/"
+start "" "https://127.0.0.1:%GDIS_PORT%/"
 echo Plataforma pronta!

@@ -1,6 +1,4 @@
 playwright>=1.40.0
 pandas
 openpyxl
-flask
-requests
-python-dotenv
+cryptography
