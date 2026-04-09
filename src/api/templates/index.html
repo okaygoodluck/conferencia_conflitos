@@ -1,104 +1,102 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-br">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plataforma Integrada GDIS</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plataforma Integrada de Manobras GDIS</title>
+    <link rel="icon" type="image/x-icon" href="/assets/icon_light.ico" />
     <style>
         :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --text: #f8fafc;
-            --text-muted: #94a3b8;
-            --border: #334155;
-            --success: #22c55e;
-            --error: #ef4444;
-            --warning: #f59e0b;
-            --glass: rgba(30, 41, 59, 0.7);
+            --bg: #0b1020;
+            --surface: #0f1730;
+            --card: #101b3a;
+            --border: rgba(255, 255, 255, 0.10);
+            --text: rgba(255, 255, 255, 0.92);
+            --muted: rgba(255, 255, 255, 0.60);
+            --focus: #6ea8fe;
+            --accent: #51d88a;
+            --danger: #ff5d5d;
+            --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            --radius: 14px;
+            --sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --mono: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
         }
 
         * {
-            margin: 0;
-            padding: 0;
             box-sizing: border-box;
-            font-family: 'Outfit', sans-serif;
         }
 
         body {
-            background: var(--bg);
+            font-family: var(--sans);
+            margin: 0;
+            background: radial-gradient(circle at 20% 20%, rgba(110, 168, 254, 0.15), transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(81, 216, 138, 0.08), transparent 40%),
+                var(--bg);
             color: var(--text);
             min-height: 100vh;
-            overflow-x: hidden;
-            background-image: radial-gradient(circle at top right, #1e1b4b, transparent),
-                radial-gradient(circle at bottom left, #1e1b4b, transparent);
-        }
-
-        .navbar {
-            height: 70px;
-            background: var(--glass);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px border var(--border);
-            display: flex;
-            align-items: center;
-            padding: 0 40px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .navbar-brand {
-            font-size: 1.5rem;
-            font-weight: 700;
-            background: linear-gradient(to right, #818cf8, #c084fc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            display: flex;
-            align-items: center;
-            gap: 12px;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1100px;
             margin: 0 auto;
-            padding: 40px;
+            padding: 40px 20px;
         }
 
-        /* Tabs */
-        .tabs {
+        header {
             display: flex;
-            gap: 8px;
-            margin-bottom: 30px;
-            background: var(--card-bg);
-            padding: 6px;
-            border-radius: 12px;
-            width: fit-content;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+
+        header img {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border: 1px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 26px;
+            margin: 0;
+            letter-spacing: -0.5px;
+        }
+
+        /* TABS */
+        .tabs-nav {
+            display: flex;
+            gap: 5px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 5px;
+            border-radius: var(--radius);
+            margin-bottom: 25px;
+            border: 1px solid var(--border);
         }
 
         .tab-btn {
-            padding: 12px 24px;
+            flex: 1;
+            padding: 12px;
             border: none;
             background: transparent;
-            color: var(--text-muted);
+            color: var(--muted);
             font-weight: 600;
             cursor: pointer;
-            border-radius: 8px;
-            transition: all 0.3s ease;
+            border-radius: 10px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 14px;
         }
 
         .tab-btn.active {
-            background: var(--primary);
-            color: white;
-            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+            background: var(--focus);
+            color: var(--bg);
+            box-shadow: 0 4px 15px rgba(110, 168, 254, 0.3);
         }
 
-        /* Sections */
         .tab-content {
             display: none;
-            animation: fadeIn 0.4s ease-out;
+            animation: fadeIn 0.3s ease;
         }
 
         .tab-content.active {
@@ -108,7 +106,7 @@
         @keyframes fadeIn {
             from {
                 opacity: 0;
-                transform: translateY(10px);
+                transform: translateY(5px);
             }
 
             to {
@@ -117,707 +115,829 @@
             }
         }
 
-        /* Dashboard Grid */
-        .grid {
-            display: grid;
-            grid-template-columns: 350px 1fr;
-            gap: 30px;
+        /* GLASS CARD */
+        .card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 30px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
         }
 
-        .sidebar {
-            display: flex;
-            flex-direction: column;
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
             gap: 20px;
         }
 
-        .card {
-            background: var(--card-bg);
-            border: 1px border var(--border);
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
-        .card-header {
-            font-size: 1.1rem;
-            font-weight: 700;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: #818cf8;
+        .col-4 {
+            grid-column: span 4;
+        }
+
+        .col-6 {
+            grid-column: span 6;
+        }
+
+        .col-12 {
+            grid-column: span 12;
         }
 
         label {
-            display: block;
-            font-size: 0.85rem;
+            font-size: 12px;
             font-weight: 600;
-            color: var(--text-muted);
-            margin-bottom: 8px;
+            text-transform: uppercase;
+            color: var(--muted);
+            letter-spacing: 0.5px;
         }
 
-        input,
-        select,
-        textarea {
-            width: 100%;
-            background: #0f172a;
-            border: 1px border var(--border);
+        input {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+            padding: 12px 15px;
             border-radius: 8px;
-            padding: 12px;
             color: white;
-            margin-bottom: 16px;
             outline: none;
-            transition: border-color 0.3s;
+            transition: border 0.2s;
+            font-size: 14px;
         }
 
         input:focus {
-            border-color: var(--primary);
+            border-color: var(--focus);
+            box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+        }
+
+        .checkgrid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: rgba(0, 0, 0, 0.15);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .checkitem {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .checkitem input {
+            cursor: pointer;
+            accent-color: var(--focus);
+            width: 16px;
+            height: 16px;
         }
 
         .btn {
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 8px;
+            padding: 14px 25px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
             font-weight: 700;
             cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
+            transition: all 0.2s;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .btn-primary {
-            background: var(--primary);
-            color: white;
+            background: var(--focus);
+            color: var(--bg);
+            border: none;
         }
 
         .btn-primary:hover {
-            background: var(--primary-hover);
-            transform: translateY(-2px);
+            filter: brightness(1.1);
+            transform: translateY(-1px);
         }
 
-        .btn-primary:disabled {
-            background: #334155;
+        .btn-outline {
+            background: transparent;
+            color: var(--text);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
             cursor: not-allowed;
             transform: none;
         }
 
-        /* Status & Progress */
-        .status-pane {
-            background: #020617;
-            border-radius: 12px;
-            padding: 15px;
-            margin-top: 10px;
-        }
-
-        .status-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-            font-size: 0.9rem;
-        }
-
-        .status-val {
-            font-weight: 700;
-            color: var(--primary);
-        }
-
-        .progress-bar-bg {
-            height: 6px;
-            background: #1e293b;
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            background: linear-gradient(to right, var(--primary), #818cf8);
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-
-        /* Terminal Proxy */
+        /* RESULTS */
         .terminal {
-            background: #000;
-            color: #10b981;
-            font-family: 'Consolas', monospace;
-            padding: 15px;
-            border-radius: 8px;
-            height: 300px;
-            overflow-y: auto;
-            font-size: 0.85rem;
-            line-height: 1.5;
-            border: 1px border #1e293b;
-            margin-top: 15px;
-            white-space: pre-wrap;
-        }
-
-        /* Results Display */
-        .result-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: var(--card-bg);
+            background: #05070a;
+            border-radius: 10px;
+            border: 1px solid #1a1f2e;
             padding: 20px;
-            border-radius: 12px;
-            border-left: 4px border var(--primary);
-        }
-
-        .stat-card.stat-hit {
-            border-left-color: var(--warning);
-        }
-
-        .stat-card.stat-error {
-            border-left-color: var(--error);
-        }
-
-        .stat-num {
-            font-size: 1.8rem;
-            font-weight: 700;
-            display: block;
-        }
-
-        .stat-label {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 1px;
+            color: #d4d4d4;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.6;
+            height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 20px;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.5);
         }
 
         table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             margin-top: 20px;
         }
 
         th {
             text-align: left;
-            padding: 14px;
-            background: #0f172a;
-            color: var(--text-muted);
-            font-size: 0.85rem;
+            padding: 12px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            border-bottom: 1px border var(--border);
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
         }
 
         td {
-            padding: 16px 14px;
-            border-bottom: 1px border var(--border);
-            font-size: 0.95rem;
+            padding: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
         }
 
         tr:hover td {
             background: rgba(255, 255, 255, 0.02);
         }
 
-        .badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 700;
-            background: var(--border);
+        .status-pill {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
         }
 
-        .badge-error {
-            background: #7f1d1d;
-            color: #fecaca;
+        .pill-running {
+            background: #f39c12;
+            color: #fff;
         }
 
-        .badge-warning {
-            background: #78350f;
-            color: #fef3c7;
+        .pill-done {
+            background: var(--accent);
+            color: #0b1020;
         }
 
-        /* Regras / Verificador Styling */
-        .rule-report {
+        .pill-error {
+            background: var(--danger);
+            color: #fff;
+        }
+
+        .summary-bar {
+            background: rgba(110, 168, 254, 0.05);
+            border: 1px solid rgba(110, 168, 254, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 13px;
+        }
+
+        /* REGRAS REPORT */
+        .report-container {
             display: flex;
             flex-direction: column;
             gap: 20px;
+            margin-top: 20px;
         }
 
         .phase-card {
-            background: #1e293b;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
             border-radius: 12px;
-            border: 1px border #334155;
             overflow: hidden;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
         }
 
         .phase-header {
+            background: rgba(255, 255, 255, 0.04);
             padding: 12px 20px;
-            background: #334155;
+            font-size: 13px;
             font-weight: 700;
-            color: #e2e8f0;
+            color: var(--focus);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border);
             cursor: pointer;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+            user-select: none;
+        }
+
+        .phase-header:hover {
+            background: rgba(255, 255, 255, 0.07);
         }
 
         .phase-header::after {
-            content: '▼';
-            font-size: 0.8rem;
+            content: '▾';
+            font-size: 18px;
             transition: transform 0.3s;
+            opacity: 0.5;
         }
 
         .phase-card.collapsed .phase-header::after {
             transform: rotate(-90deg);
         }
 
-        .phase-card.collapsed .rule-list {
-            display: none;
+        .phase-card.collapsed .phase-header {
+            border-bottom-color: transparent;
         }
 
         .rule-list {
-            padding: 10px;
+            padding: 10px 0;
+            transition: max-height 0.3s ease-out, opacity 0.2s;
+            opacity: 1;
+        }
+
+        .phase-card.collapsed .rule-list {
+            max-height: 0;
+            padding: 0;
+            overflow: hidden;
+            opacity: 0;
         }
 
         .rule-item {
-            padding: 10px 15px;
-            border-bottom: 1px border #1e293b;
             display: flex;
             align-items: flex-start;
-            gap: 15px;
-            font-size: 0.95rem;
+            gap: 12px;
+            padding: 10px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            transition: background 0.2s;
         }
 
         .rule-item:last-child {
             border-bottom: none;
         }
 
+        .rule-item:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
         .rule-status {
-            min-width: 24px;
-            display: flex;
-            justify-content: center;
+            font-size: 16px;
+            margin-top: -2px;
         }
 
         .rule-text {
+            font-size: 13px;
+            line-height: 1.5;
+            color: rgba(255, 255, 255, 0.85);
             flex: 1;
         }
 
-        .rule-item.ok {
-            border-left: 4px border var(--success);
-            background: rgba(34, 197, 94, 0.05);
+        .rule-item.fail .rule-text {
+            color: var(--danger);
+            font-weight: 500;
         }
 
-        .rule-item.fail {
-            border-left: 4px border var(--error);
-            background: rgba(239, 68, 68, 0.05);
+        .rule-item.warn .rule-text {
+            color: #f39c12;
         }
 
-        .rule-item.warn {
-            border-left: 4px border var(--warning);
-            background: rgba(245, 158, 11, 0.05);
-        }
-
-        .status-pill {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: bold;
-        }
-
-        .pill-running {
-            background: rgba(79, 70, 229, 0.2);
-            color: #818cf8;
-            border: 1px border #4f46e5;
-        }
-
-        .pill-done {
-            background: rgba(34, 197, 94, 0.2);
-            color: #4ade80;
-            border: 1px border #22c55e;
-        }
-
-        .pill-error {
-            background: rgba(239, 68, 68, 0.2);
-            color: #f87171;
-            border: 1px border #ef4444;
-        }
-
-        .summary-dash {
+        .summary-dashboard {
             display: flex;
             gap: 15px;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
         }
 
         .summary-stat {
             flex: 1;
-            padding: 15px;
+            padding: 20px;
             border-radius: 12px;
+            border: 1px solid var(--border);
             text-align: center;
         }
 
+        .stat-val {
+            font-size: 24px;
+            font-weight: 800;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: var(--muted);
+            letter-spacing: 1px;
+        }
+
         .stat-ok {
-            background: rgba(34, 197, 94, 0.1);
-            color: #4ade80;
+            border-color: rgba(81, 216, 138, 0.2);
+            background: rgba(81, 216, 138, 0.05);
+        }
+
+        .stat-ok .stat-val {
+            color: var(--accent);
         }
 
         .stat-fail {
-            background: rgba(239, 68, 68, 0.1);
-            color: #f87171;
+            border-color: rgba(255, 93, 93, 0.2);
+            background: rgba(255, 93, 93, 0.05);
+        }
+
+        .stat-fail .stat-val {
+            color: var(--danger);
         }
 
         .stat-warn {
-            background: rgba(245, 158, 11, 0.1);
-            color: #fbbf24;
+            border-color: rgba(243, 156, 18, 0.2);
+            background: rgba(243, 156, 18, 0.05);
         }
 
-        .stat-val {
-            font-size: 1.5rem;
-            font-weight: 800;
+        .stat-warn .stat-val {
+            color: #f39c12;
+        }
+
+        .btn-toggle-log {
+            font-size: 11px;
+            color: var(--muted);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+            margin-top: 10px;
+        }
+
+        .btn-toggle-log:hover {
+            color: var(--focus);
+        }
+
+        .disclaimer-inline {
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.4;
+            flex: 1;
+            text-align: left;
+            padding-left: 20px;
+            border-left: 1px solid var(--border);
+            margin-left: 10px;
+        }
+
+        /* CONSOLE DRAWER */
+        #global-console {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #05070a;
+            border-top: 1px solid #1a1f2e;
+            z-index: 1000;
+            transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            height: 40px; /* Recolhido */
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        #global-console.expanded {
+            height: 400px;
+        }
+
+        .console-handle {
+            height: 40px;
+            min-height: 40px;
+            background: #0f1730;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            cursor: pointer;
+            border-top: 1px solid var(--border);
+            justify-content: space-between;
+        }
+
+        .console-handle:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .handle-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--focus);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .handle-title::before {
+            content: '>';
+            font-family: var(--mono);
+        }
+
+        .handle-actions {
+            display: flex;
+            gap: 15px;
+        }
+
+        .btn-console {
+            background: transparent;
+            border: none;
+            color: var(--muted);
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn-console:hover {
+            color: white;
+        }
+
+        .console-body {
+            flex: 1;
+            overflow: hidden;
+            display: none;
+            padding: 0 10px 10px 10px;
+        }
+
+        #global-console.expanded .console-body {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .terminal-tabs {
+            display: flex;
+            gap: 10px;
+            padding: 10px 10px 5px 10px;
+        }
+
+        .term-tab-btn {
+            padding: 5px 12px;
+            font-size: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .term-tab-btn.active {
+            border-color: var(--focus);
+            color: var(--focus);
+            background: rgba(110, 168, 254, 0.1);
+        }
+
+        .terminal-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #000;
+            border-radius: 6px;
+            border: 1px solid #1a1f2e;
+        }
+
+        .terminal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 100%;
+            margin-top: 0;
+            display: none;
+        }
+
+        .terminal.active {
             display: block;
         }
     </style>
 </head>
 
 <body>
-    <nav class="navbar">
-        <div class="navbar-brand">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-                stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-            </svg>
-            PLATAFORMA INTEGRADA GDIS
-        </div>
-    </nav>
-
     <div class="container">
-        <div class="tabs">
-            <button class="tab-btn active" onclick="showTab('tab-conflitos')">Verificador de Conflitos</button>
-            <button class="tab-btn" onclick="showTab('tab-regras')">Validador de Regras</button>
+        <header>
+            <img src="/assets/icon_light.png" alt="Logo">
+            <div>
+                <h1>Plataforma Integrada GDIS</h1>
+                <p style="color: var(--muted); font-size: 12px; margin: 4px 0 0 0;">Verificador de Conflitos & Validação
+                    de Regras</p>
+            </div>
+        </header>
+
+        <nav class="tabs-nav">
+            <button class="tab-btn active" onclick="showTab('conflitos', this)">🔌 Conflitos entre Manobras</button>
+            <button class="tab-btn" onclick="showTab('regras', this)">📜 Validação de Regras Base</button>
+        </nav>
+
+        <!-- TELA: CONFLITOS -->
+        <div id="tab-conflitos" class="tab-content active">
+            <section class="card">
+                <form id="form-conflitos">
+                    <div class="grid">
+                        <div class="field col-4">
+                            <label>Manobra Base (Opcional)</label>
+                            <input type="text" id="conf-manobra" placeholder="Ex: 239130082">
+                        </div>
+                        <div class="field col-4">
+                            <label>Solicitações Base (Opcional)</label>
+                            <input type="text" id="conf-solicitacoes" placeholder="Ex: 12345, 67890">
+                        </div>
+                        <div class="field col-2">
+                            <label>Data Início</label>
+                            <input type="text" id="conf-di" required placeholder="01/03/2026" maxlength="10">
+                        </div>
+                        <div class="field col-2">
+                            <label>Data Fim</label>
+                            <input type="text" id="conf-df" required placeholder="30/03/2026" maxlength="10">
+                        </div>
+                        <div class="field col-6">
+                            <label>Usuário GDIS</label>
+                            <input type="text" class="shared-user" id="conf-user" required placeholder="Colaborador">
+                        </div>
+                        <div class="field col-6">
+                            <label>Senha GDIS</label>
+                            <input type="password" class="shared-pass" id="conf-pass" required>
+                        </div>
+                        <div class="field col-6">
+                            <label>Equipamentos Específicos</label>
+                            <input type="text" id="conf-eq-manual" placeholder="Ex: 24-83300, 22-12345">
+                        </div>
+                        <div class="field col-6">
+                            <label>Alimentadores Específicos</label>
+                            <input type="text" id="conf-al-manual" placeholder="Ex: ERN01, EST02">
+                        </div>
+                        <div class="field col-12">
+                            <label>Situações para Verificação</label>
+                            <div class="checkgrid">
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EB" checked> EB
+                                    (Elaborada)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EN" checked> EN
+                                    (Enviada)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="CO"> CO
+                                    (Completa)</label>
+                                <label class="checkitem"><input type="checkbox" name="sit" value="EA"> EA
+                                    (Análise)</label>
+                            </div>
+                        </div>
+                        <div class="field col-12">
+                            <label>Filtrar por Malhas</label>
+                            <div class="checkgrid">
+                                <label class="checkitem"><input type="checkbox" name="mal" value="CN"> CN -
+                                    Centro</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="LE"> LE -
+                                    Leste</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="MQ"> MQ -
+                                    Mantiqueira</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="NT"> NT -
+                                    Norte</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="SU"> SU - Sul</label>
+                                <label class="checkitem"><input type="checkbox" name="mal" value="TA"> TA -
+                                    Triângulo</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 30px; display: flex; align-items: center; gap: 15px;">
+                        <button type="submit" id="btn-conf-start" class="btn btn-primary">🚀 Iniciar
+                            Verificação</button>
+                        <button type="button" id="btn-conf-cancel" class="btn btn-outline" disabled>Parar</button>
+                        <a id="lnk-conf-export" href="#" class="btn btn-outline"
+                            style="display:none; text-decoration: none;">⬇ Exportar CSV</a>
+                        <div class="disclaimer-inline">
+                            ⚠️ ESTA FERRAMENTA ATUA COMO APOIO ÀS SUAS ATIVIDADES OPERACIONAIS. A CONFERÊNCIA E VALIDAÇÃO
+                            DAS INFORMAÇÕES CONTINUAM SENDO DE RESPONSABILIDADE DO USUÁRIO.
+                        </div>
+                    </div>
+                </form>
+            </section>
+
+            <section id="pane-conf-status" class="card" style="display:none;">
+                <div id="txt-conf-main" style="font-weight: 700; font-size: 16px;"></div>
+                <div id="txt-conf-small" style="color: var(--muted); font-size: 13px; margin-top: 10px;"></div>
+                <button type="button" class="btn-toggle-log" onclick="toggleConsole('conf')">Abrir Console de Conflitos</button>
+            </section>
+
+            <section id="pane-conf-results" class="card" style="display:none;">
+                <div id="conf-summary-bar" class="summary-bar"></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Manobra</th>
+                            <th>Situações</th>
+                            <th>Equipamentos</th>
+                            <th>Alimentadores</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbl-conf-body"></tbody>
+                </table>
+            </section>
         </div>
 
-        <!-- ABA DE CONFLITOS -->
-        <div id="tab-conflitos" class="tab-content active">
-            <div class="grid">
-                <div class="sidebar">
-                    <div class="card">
-                        <div class="card-header">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <circle cx="11" cy="11" r="8"></circle>
-                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                            </svg>
-                            Parâmetros de Busca
+        <!-- TELA: REGRAS -->
+        <div id="tab-regras" class="tab-content">
+            <section class="card">
+                <form id="form-regras">
+                    <div class="grid">
+                        <div class="field col-12">
+                            <label>Número da Manobra Base</label>
+                            <input type="text" id="reg-manobra" required placeholder="Digite o número da manobra">
                         </div>
-
-                        <label>Manobra Base (Principal)</label>
-                        <input type="text" id="conf-base" placeholder="Ex: 202412345">
-
-                        <label>Solicitações Base (Opcional)</label>
-                        <textarea id="conf-solicitacoes" placeholder="Ex: 812345, 812346" rows="2"></textarea>
-
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                            <div>
-                                <label>Início</label>
-                                <input type="text" id="conf-di" placeholder="dd/mm/aaaa">
-                            </div>
-                            <div>
-                                <label>Fim</label>
-                                <input type="text" id="conf-df" placeholder="dd/mm/aaaa">
-                            </div>
+                        <div class="field col-6">
+                            <label>Usuário GDIS</label>
+                            <input type="text" class="shared-user" id="reg-user" required>
                         </div>
-
-                        <label>Usuário GDIS</label>
-                        <input type="text" id="conf-user" value="">
-
-                        <label>Senha</label>
-                        <input type="password" id="conf-pass" value="">
-
-                        <label>Situações</label>
-                        <input type="text" id="conf-sit" value="EB, EN" placeholder="Situações separatedas por vírgula">
-
-                        <label>Malhas (Opcional)</label>
-                        <input type="text" id="conf-malhas" placeholder="Ex: NT, SU, LE">
-
-                        <button id="btn-conf-start" class="btn btn-primary" onclick="startConflitos()">
-                            INICIAR VERIFICAÇÃO
-                        </button>
-
-                        <div id="pane-conf-status" class="status-pane" style="display: none;">
-                            <div class="status-row">
-                                <span id="conf-status-text">Processando...</span>
-                                <span class="status-val" id="conf-status-perc">0%</span>
-                            </div>
-                            <div class="progress-bar-bg">
-                                <div id="conf-progress-bar" class="progress-bar-fill"></div>
-                            </div>
-                            <div class="status-row" style="margin-top: 10px; font-size: 0.8rem;">
-                                <span>ETA: <span id="conf-status-eta">--:--</span></span>
-                                <span><span id="conf-status-count">0</span>/<span id="conf-status-total">0</span></span>
-                            </div>
-                        </div>
-
-                        <button class="btn" style="margin-top: 10px; background: #1e293b; color: #94a3b8;" onclick="toggleConfLog()">
-                            Ver Logs do Servidor
-                        </button>
-                    </div>
-                </div>
-
-                <div class="main-content">
-                    <div id="pane-conf-terminal" class="terminal" style="display: none;">Aguardando início...</div>
-
-                    <div id="conf-results" style="display: none;">
-                        <div class="result-stats">
-                            <div class="stat-card">
-                                <span class="stat-num" id="stat-total">0</span>
-                                <span class="stat-label">Analisadas</span>
-                            </div>
-                            <div class="stat-card stat-hit">
-                                <span class="stat-num" id="stat-conflitos">0</span>
-                                <span class="stat-label">Com Conflito</span>
-                            </div>
-                            <div class="stat-card">
-                                <span class="stat-num" id="stat-time">0s</span>
-                                <span class="stat-label">Tempo Total</span>
-                            </div>
-                            <div class="stat-card stat-error" id="card-falhas" style="display: none;">
-                                <span class="stat-num" id="stat-falhas">0</span>
-                                <span class="stat-label">Falhas</span>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <div class="card-header" style="justify-content: space-between;">
-                                <span>Relatório de Conflitos</span>
-                                <button onclick="exportCSV()"
-                                    style="background: #22c55e; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; font-weight: 700;">
-                                    Exportar CSV
-                                </button>
-                            </div>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Manobra</th>
-                                        <th>Situações</th>
-                                        <th>Equipamentos em Comum</th>
-                                        <th>Alimentadores / Subestações</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="conf-table-body"></tbody>
-                            </table>
+                        <div class="field col-6">
+                            <label>Senha GDIS</label>
+                            <input type="password" class="shared-pass" id="reg-pass" required>
                         </div>
                     </div>
-
-                    <div id="conf-welcome" class="card"
-                        style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(30, 41, 59, 0.4);">
-                        <div
-                            style="width: 80px; height: 80px; background: rgba(79, 70, 229, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                            </svg>
+                    <div style="margin-top: 30px; display: flex; align-items: center; gap: 15px;">
+                        <button type="submit" id="btn-reg-start" class="btn btn-primary">🔍 Analisar Regras
+                            GDIS</button>
+                        <span id="reg-status-badge" class="status-pill" style="display:none;"></span>
+                        <div class="disclaimer-inline">
+                            ⚠️ ESTA FERRAMENTA ATUA COMO APOIO ÀS SUAS ATIVIDADES OPERACIONAIS. AINDA ASSIM, A CONFERÊNCIA
+                            E VALIDAÇÃO DAS INFORMAÇÕES CONTINUAM SENDO DE RESPONSABILIDADE DO USUÁRIO, VISTO QUE NEM
+                            TODOS OS CENÁRIOS PODEM SER INTEGRALMENTE COBERTOS PELA FERRAMENTA.
                         </div>
-                        <h2 style="margin-bottom: 10px;">Pronto para iniciar</h2>
-                        <p style="color: var(--text-muted); max-width: 400px;">Preencha os dados à esquerda para realizar
-                            a verificação de conflitos de equipamentos entre manobras no GDIS.</p>
                     </div>
-                </div>
+                </form>
+            </section>
+
+            <section id="pane-reg-results" style="display:none; margin-top:20px;">
+                <div id="reg-summary-dash" class="summary-dashboard"></div>
+                <div id="reg-report-content" class="report-container"></div>
+                <button type="button" class="btn-toggle-log" onclick="toggleConsole('reg')">Abrir Console de Regras</button>
+            </section>
+        </div>
+
+    <div id="global-console">
+        <div class="console-handle" onclick="toggleConsole()">
+            <div class="handle-title">Console Técnico GDIS</div>
+            <div class="handle-actions">
+                <button class="btn-console" onclick="clearConsole(event)">Limpar</button>
+                <button class="btn-console" id="console-toggle-btn">Expandir [^]</button>
             </div>
         </div>
-
-        <!-- ABA DE VALIDAÇÃO DE REGRAS -->
-        <div id="tab-regras" class="tab-content">
-            <div class="grid">
-                <div class="sidebar">
-                    <div class="card">
-                        <div class="card-header">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                <polyline points="14 2 14 8 20 8"></polyline>
-                                <line x1="16" y1="13" x2="8" y2="13"></line>
-                                <line x1="16" y1="17" x2="8" y2="17"></line>
-                                <polyline points="10 9 9 9 8 9"></polyline>
-                            </svg>
-                            Validação por Manobra
-                        </div>
-
-                        <label>Número da Manobra</label>
-                        <input type="text" id="reg-manobra" placeholder="Ex: 202412345">
-
-                        <label>Usuário GDIS</label>
-                        <input type="text" id="reg-user" value="">
-
-                        <label>Senha</label>
-                        <input type="password" id="reg-pass" value="">
-
-                        <button id="btn-reg-start" class="btn btn-primary" onclick="startRegras()">
-                            VALIDAR REGRAS
-                        </button>
-
-                        <div id="reg-status-display" style="margin-top: 20px; display: none; text-align: center;">
-                            <span id="reg-status-badge" class="status-pill pill-running">Processando...</span>
-                        </div>
-
-                        <button class="btn" style="margin-top: 10px; background: #1e293b; color: #94a3b8;" onclick="toggleRegLog()">
-                            Ver Saída Técnica
-                        </button>
-                    </div>
-                </div>
-
-                <div class="main-content">
-                    <div id="pane-reg-terminal" class="terminal" style="display: none;">Aguardando...</div>
-
-                    <div id="reg-results" style="display: none;">
-                        <div class="summary-dash" id="reg-summary-dash">
-                            <!-- JS populated -->
-                        </div>
-
-                        <div id="reg-report-content" class="rule-report">
-                            <!-- JS populated cards -->
-                        </div>
-                    </div>
-
-                    <div id="reg-welcome" class="card"
-                        style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(30, 41, 59, 0.4);">
-                        <div
-                            style="width: 80px; height: 80px; background: rgba(129, 140, 248, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2">
-                                <path d="M9 11l3 3L22 4"></path>
-                                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-                            </svg>
-                        </div>
-                        <h2 style="margin-bottom: 10px;">Validador de Regras</h2>
-                        <p style="color: var(--text-muted); max-width: 400px;">Verifica automaticamente todas as regras de
-                            segurança e conformidade (Regras 36, 37, 38, etc) para uma manobra específica.</p>
-                    </div>
-                </div>
+        <div class="console-body">
+            <div class="terminal-tabs">
+                <button id="tab-btn-conf" class="term-tab-btn active" onclick="switchConsoleTab('conf', event)">Conflitos</button>
+                <button id="tab-btn-reg" class="term-tab-btn" onclick="switchConsoleTab('reg', event)">Regras</button>
+            </div>
+            <div class="terminal-container">
+                <section id="pane-conf-terminal" class="terminal active"></section>
+                <section id="pane-reg-terminal" class="terminal"></section>
             </div>
         </div>
     </div>
 
     <script>
-        function showTab(id) {
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        let confJobId = null, regJobId = null;
+        let confTimer = null, regTimer = null;
+
+        // --- SISTEMA DE ABAS ---
+        function showTab(id, btn) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(id).classList.add('active');
-            event.currentTarget.classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            document.getElementById('tab-' + id).classList.add('active');
         }
 
-        // --- CONFLITOS LOGIC ---
-        let confJobId = null;
-        let confTimer = null;
+        // Sincronização de User/Pass
+        document.querySelectorAll('.shared-user').forEach(el => {
+            el.addEventListener('input', (e) => document.querySelectorAll('.shared-user').forEach(x => x.value = e.target.value));
+        });
+        document.querySelectorAll('.shared-pass').forEach(el => {
+            el.addEventListener('input', (e) => document.querySelectorAll('.shared-pass').forEach(x => x.value = e.target.value));
+        });
 
-        async function startConflitos() {
-            const btn = document.getElementById('btn-conf-start');
-            btn.disabled = true;
-            document.getElementById('conf-welcome').style.display = 'none';
+        // Máscara de Data
+        function maskDate(e) {
+            let v = e.target.value.replace(/\D/g, '').slice(0, 8);
+            if (v.length > 4) v = v.slice(0, 2) + '/' + v.slice(2, 4) + '/' + v.slice(4);
+            else if (v.length > 2) v = v.slice(0, 2) + '/' + v.slice(2);
+            e.target.value = v;
+        }
+        document.getElementById('conf-di').oninput = maskDate;
+        document.getElementById('conf-df').oninput = maskDate;
+
+        // --- LÓGICA CONFLITOS ---
+        document.getElementById('form-conflitos').onsubmit = async (e) => {
+            e.preventDefault();
+            const sit = Array.from(document.querySelectorAll('input[name="sit"]:checked')).map(x => x.value).join(',');
+            const mal = Array.from(document.querySelectorAll('input[name="mal"]:checked')).map(x => x.value).join(',');
+
+            const params = new URLSearchParams();
+            params.set('manobra', document.getElementById('conf-manobra').value);
+            params.set('di', document.getElementById('conf-di').value);
+            params.set('df', document.getElementById('conf-df').value);
+            params.set('user', document.getElementById('conf-user').value);
+            params.set('pass', document.getElementById('conf-pass').value);
+            params.set('equipamentos', document.getElementById('conf-eq-manual').value);
+            params.set('alimentadores', document.getElementById('conf-al-manual').value);
+            params.set('solicitacoes', document.getElementById('conf-solicitacoes').value);
+            params.set('situacoes', sit);
+            params.set('malhas', mal);
+
+            document.getElementById('btn-conf-start').disabled = true;
+            document.getElementById('btn-conf-cancel').disabled = false;
             document.getElementById('pane-conf-status').style.display = 'block';
-            document.getElementById('conf-results').style.display = 'none';
+            document.getElementById('pane-conf-results').style.display = 'none';
+            // document.getElementById('pane-conf-terminal').style.display = 'none'; // Removido
+            document.getElementById('pane-conf-terminal').textContent = "";
+            document.getElementById('txt-conf-main').textContent = "Iniciando processamento...";
 
-            const payload = {
-                manobra: document.getElementById('conf-base').value,
-                solicitacoes: document.getElementById('conf-solicitacoes').value,
-                di: document.getElementById('conf-di').value,
-                df: document.getElementById('conf-df').value,
-                user: document.getElementById('conf-user').value,
-                pass: document.getElementById('conf-pass').value,
-                situacoes: document.getElementById('conf-sit').value,
-                malhas: document.getElementById('conf-malhas').value
-            };
-
-            const res = await fetch('/conflitos/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            const res = await fetch('/conflitos/start', { method: 'POST', body: params });
             const data = await res.json();
             confJobId = data.job_id;
-
             clearInterval(confTimer);
-            confTimer = setInterval(pollConflitos, 1500);
-        }
+            confTimer = setInterval(pollConf, 1000);
+        };
 
-        async function pollConflitos() {
+        async function pollConf() {
             const res = await fetch('/conflitos/status?job_id=' + confJobId);
             const data = await res.json();
 
-            // Logs
-            const terminal = document.getElementById('pane-conf-terminal');
-            terminal.textContent = data.log || '';
-            terminal.scrollTop = terminal.scrollHeight;
+            const term = document.getElementById('pane-conf-terminal');
+            if (data.log) {
+                term.textContent = data.log;
+                term.scrollTop = term.scrollHeight;
+            }
 
-            // Progresso
-            const perc = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
-            document.getElementById('conf-status-perc').textContent = perc + '%';
-            document.getElementById('conf-progress-bar').style.width = perc + '%';
-            document.getElementById('conf-status-eta').textContent = data.eta || '--:--';
-            document.getElementById('conf-status-count').textContent = data.processed;
-            document.getElementById('conf-status-total').textContent = data.total;
-
-            if (data.state === 'done') {
+            if (data.state === 'running') {
+                document.getElementById('txt-conf-main').innerHTML = `⚙️ Processando: <span style="color:var(--focus)">${data.processed}</span> / ${data.total}`;
+                document.getElementById('txt-conf-small').textContent = `Conflitos: ${data.conflitos} | Falhas: ${data.falhas} | Tempo: ${data.elapsed} | ETA: ${data.eta}`;
+            } else if (data.state === 'done') {
                 clearInterval(confTimer);
-                finishConflitos();
+                document.getElementById('btn-conf-start').disabled = false;
+                document.getElementById('btn-conf-cancel').disabled = true;
+                const rRes = await fetch('/conflitos/result?job_id=' + confJobId);
+                const rData = await rRes.json();
+                showConfResults(rData);
             } else if (data.state === 'error') {
                 clearInterval(confTimer);
-                alert('Erro na verificação: ' + data.error);
+                document.getElementById('txt-conf-main').innerHTML = `<span style="color:var(--danger)">❌ Erro: ${data.error}</span>`;
                 document.getElementById('btn-conf-start').disabled = false;
             }
         }
 
-        async function finishConflitos() {
-            const res = await fetch('/conflitos/result?job_id=' + confJobId);
-            const r = await res.json();
-
+        function showConfResults(data) {
             document.getElementById('pane-conf-status').style.display = 'none';
-            document.getElementById('conf-results').style.display = 'block';
-            document.getElementById('btn-conf-start').disabled = false;
+            document.getElementById('pane-conf-results').style.display = 'block';
+            const sourceInfo = data.base ? `Manobra ${data.base}` : `Busca Direta por Equipamentos/Alimentadores`;
+            document.getElementById('conf-summary-bar').textContent = `Resultados para ${sourceInfo}: ${data.conflitos.length} conflitos encontrados em ${data.total_unico_sem_base} manobras analisadas (${data.elapsed}).`;
 
-            document.getElementById('stat-total').textContent = r.total_unico_sem_base;
-            document.getElementById('stat-conflitos').textContent = r.conflitos.length;
-            document.getElementById('stat-time').textContent = Math.round(r.elapsed_seconds) + 's';
-
-            if (r.falhas && r.falhas.length > 0) {
-                document.getElementById('card-falhas').style.display = 'block';
-                document.getElementById('stat-falhas').textContent = r.falhas.length;
-            }
-
-            const tbody = document.getElementById('conf-table-body');
+            const tbody = document.getElementById('tbl-conf-body');
             tbody.innerHTML = '';
 
-            r.conflitos.forEach(c => {
+            // Adiciona conflitos internos primeiro, se houver
+            if (data.conflitos_internos && data.conflitos_internos.length > 0) {
+                data.conflitos_internos.forEach(c => {
+                    const tr = document.createElement('tr');
+                    tr.style.backgroundColor = 'rgba(255, 165, 0, 0.1)';
+                    tr.innerHTML = `<td><span style="color:orange">⚠️ ${c.origem} vs ${c.destino}</span></td><td><span class="status-pill" style="background:orange; color:black">CONFLITO INTERNO</span></td><td>${c.equipamentos.join('; ')}</td><td>${c.alimentadores.join('; ')}</td>`;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            data.conflitos.forEach(c => {
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><b>${c.manobra}</b></td>
-                    <td>${c.situacoes.map(s => `<span class="badge">${s}</span>`).join(' ')}</td>
-                    <td style="color: #fda4af">${c.equipamentos.join('; ')}</td>
-                    <td style="color: #fcd34d">${c.alimentadores.join('; ')}</td>
-                `;
+                tr.innerHTML = `<td><b>${c.manobra}</b></td><td>${c.situacoes.join(', ')}</td><td>${c.equipamentos.join('; ')}</td><td>${c.alimentadores.join('; ')}</td>`;
                 tbody.appendChild(tr);
             });
+            document.getElementById('lnk-conf-export').href = `/conflitos/export?job_id=${confJobId}`;
+            document.getElementById('lnk-conf-export').style.display = 'inline-block';
         }
 
-        function exportCSV() {
-            if (confJobId) window.open('/conflitos/export?job_id=' + confJobId);
-        }
-
-        // --- REGRAS LOGIC ---
-        let regJobId = null;
-        let regTimer = null;
-
-        async function startRegras() {
-            document.getElementById('btn-reg-start').disabled = true;
-            document.getElementById('reg-welcome').style.display = 'none';
-            document.getElementById('reg-results').style.display = 'block';
-            document.getElementById('reg-status-display').style.display = 'block';
-            const badge = document.getElementById('reg-status-badge');
-            badge.className = 'status-pill pill-running';
-            badge.textContent = 'Processando...';
-
+        // --- LÓGICA REGRAS ---
+        document.getElementById('form-regras').onsubmit = async (e) => {
+            e.preventDefault();
             const payload = {
                 manobra: document.getElementById('reg-manobra').value,
                 usuario: document.getElementById('reg-user').value,
                 senha: document.getElementById('reg-pass').value
             };
+
+            document.getElementById('btn-reg-start').disabled = true;
+            document.getElementById('pane-reg-results').style.display = 'block';
+            document.getElementById('reg-report-content').innerHTML = '<div style="padding:40px; text-align:center; color:var(--muted);"><span style="display:block; font-size:30px; margin-bottom:15px;">🚀</span> Iniciando Robô Web e simulando login GDIS...</div>';
+            document.getElementById('reg-summary-dash').innerHTML = '';
+            // document.getElementById('pane-reg-terminal').style.display = 'none'; // Removido
+            document.getElementById('pane-reg-terminal').textContent = "";
+
+            const badge = document.getElementById('reg-status-badge');
+            badge.style.display = 'inline-block';
+            badge.className = 'status-pill pill-running';
+            badge.textContent = 'Executando';
 
             const res = await fetch('/regras/start', {
                 method: 'POST',
@@ -830,14 +950,37 @@
             regTimer = setInterval(pollReg, 1000);
         };
 
-        function toggleRegLog() {
-            const t = document.getElementById('pane-reg-terminal');
-            t.style.display = t.style.display === 'none' ? 'block' : 'none';
+        function toggleConsole(context) {
+            const console = document.getElementById('global-console');
+            const isExpanded = (context || !console.classList.contains('expanded'));
+            
+            if (isExpanded) console.classList.add('expanded');
+            else console.classList.remove('expanded');
+
+            const toggleBtn = document.getElementById('console-toggle-btn');
+            toggleBtn.textContent = console.classList.contains('expanded') ? 'Recolher [v]' : 'Expandir [^]';
+
+            if (context) {
+                switchConsoleTab(context);
+            }
         }
 
-        function toggleConfLog() {
-            const t = document.getElementById('pane-conf-terminal');
-            t.style.display = t.style.display === 'none' ? 'block' : 'none';
+        function switchConsoleTab(context, event) {
+            if (event) event.stopPropagation();
+
+            document.querySelectorAll('.term-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.terminal').forEach(t => t.classList.remove('active'));
+
+            document.getElementById('tab-btn-' + context).classList.add('active');
+            const term = document.getElementById('pane-' + context + '-terminal');
+            term.classList.add('active');
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function clearConsole(event) {
+            if (event) event.stopPropagation();
+            document.getElementById('pane-conf-terminal').textContent = "";
+            document.getElementById('pane-reg-terminal').textContent = "";
         }
 
         async function pollReg() {
