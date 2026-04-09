@@ -9,17 +9,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-atividades.log
-
-# Certeficates
-data/server.crt
-data/server.key
-
 # Environment Variables
 .env
 *.env
+atividades.log
+erros.txt
 
 # Virtual Environments
 .venv/
@@ -36,10 +30,17 @@ others/__pycache__/
 temp/
 
 # Data and archives
+data/
+!data/.keep
 *.csv
 *.jsonl
 *.zip
 *.tmp
+.gemini/
+brain/
+skills/
+dist_gdis/
+GDIS_Portatil/
 
 # Playwright & Node
 node_modules/

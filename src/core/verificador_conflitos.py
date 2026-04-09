@@ -134,9 +134,7 @@ def _normalize_malhas(values):
     return out
 
 
-def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=None, situacoes=None, malhas=None, base_eq_manual=None, base_al_manual=None):
-    gdis_http_extrator.DATA_INICIO = data_inicio
-    gdis_http_extrator.DATA_FIM = data_fim
+def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=None, situacoes=None, malhas=None, base_eq_manual=None, base_al_manual=None, solicitacoes=None):
 
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -147,21 +145,60 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
     except ValueError as e:
         raise RuntimeError(str(e))
 
+    # Dicionário para armazenar equipamentos de cada base (para conflitos entre elas)
+    bases_data = {}
+
     # Se uma manobra base for fornecida, extraímos seus dados.
     if base and str(base).strip():
         base_eq, base_al, vs = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, base, malha="")
-        base_eq, base_al = _normalize_sets(base_eq, base_al)
+        beq, bal = _normalize_sets(base_eq, base_al)
+        bases_data[f"Manobra {base}"] = {"eq": beq, "al": bal}
     else:
-        base_eq, base_al = set(), set()
+        beq, bal = set(), set()
     
+    # Se houver solicitações, extraímos cada uma
+    if solicitacoes:
+        for sol_num in solicitacoes:
+            sol_num = str(sol_num).strip()
+            if not sol_num: continue
+            try:
+                s_eq, s_al, vs = gdis_http_extrator.extrair_uma_solicitacao(opener, jsessionid, vs, sol_num)
+                seq, sal = _normalize_sets(s_eq, s_al)
+                bases_data[f"Solicitação {sol_num}"] = {"eq": seq, "al": sal}
+                beq.update(seq)
+                bal.update(sal)
+            except Exception as e:
+                print(f"Erro ao extrair solicitação {sol_num}: {e}")
+
     # Se houver itens manuais, adicionamos ao conjunto de busca
     if base_eq_manual:
         manual_eq, _ = _normalize_sets(base_eq_manual, [])
-        base_eq.update(manual_eq)
+        beq.update(manual_eq)
+        bases_data["Itens Manuais"] = bases_data.get("Itens Manuais", {"eq": set(), "al": set()})
+        bases_data["Itens Manuais"]["eq"].update(manual_eq)
     
     if base_al_manual:
         _, manual_al = _normalize_sets([], base_al_manual)
-        base_al.update(manual_al)
+        bal.update(manual_al)
+        bases_data["Itens Manuais"] = bases_data.get("Itens Manuais", {"eq": set(), "al": set()})
+        bases_data["Itens Manuais"]["al"].update(manual_al)
+
+    # Identificar conflitos ENTRE as bases (Manobra vs Sol, Sol vs Sol)
+    conflitos_internos = []
+    base_names = sorted(bases_data.keys())
+    for i in range(len(base_names)):
+        for j in range(i + 1, len(base_names)):
+            b1 = base_names[i]
+            b2 = base_names[j]
+            eq_hit = sorted(bases_data[b1]["eq"].intersection(bases_data[b2]["eq"]))
+            al_hit = sorted(bases_data[b1]["al"].intersection(bases_data[b2]["al"]))
+            if eq_hit or al_hit:
+                conflitos_internos.append({
+                    "origem": b1,
+                    "destino": b2,
+                    "equipamentos": eq_hit,
+                    "alimentadores": al_hit
+                })
 
     situacoes = _normalize_situacoes(situacoes) if situacoes is not None else _parse_situacoes_env()
     if not situacoes:
@@ -169,25 +206,21 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
     
     malhas = _normalize_malhas(malhas)
     if not malhas:
-        # Se nenhuma malha for fornecida, busca em todas (representado por string vazia)
         malhas = [""]
-    
+
     ids_por_situacao = {}
     situacoes_por_manobra = {}
     contagem_por_malha = {}
     malhas_por_manobra = {}
     
-    # Loop principal por malha, depois por situação
     for malha in malhas:
         malha_key = malha if malha else "Global"
         contagem_por_malha[malha_key] = {}
 
         for sit in situacoes:
-            ids, vs = gdis_http_extrator.coletar_manobras(opener, jsessionid, vs, sit, malha=malha)
-            
+            ids, vs = gdis_http_extrator.coletar_manobras(opener, jsessionid, vs, sit, data_inicio, data_fim, malha=malha)
             contagem_por_malha[malha_key][sit] = len(ids)
 
-            # Acumula os IDs por situação (considerando a malha)
             if sit not in ids_por_situacao:
                 ids_por_situacao[sit] = []
             ids_por_situacao[sit].extend(ids)
@@ -196,14 +229,13 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 if m not in situacoes_por_manobra:
                     situacoes_por_manobra[m] = set()
                 situacoes_por_manobra[m].add(sit)
-                # Store the malha associated with this manobra. If multiple, any valid one works.
                 malhas_por_manobra[m] = malha
 
-    # Garante que os IDs em cada situação são únicos
     for sit in ids_por_situacao:
         ids_por_situacao[sit] = sorted(list(set(ids_por_situacao[sit])))
 
     todos_unico = sorted(set(situacoes_por_manobra.keys()))
+    # Remove a própria manobra base da lista de verificação se ela foi encontrada na busca
     if base in todos_unico:
         todos_unico = [x for x in todos_unico if x != base]
 
@@ -220,18 +252,15 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             eq, al, vs = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, numero, malha=m_malha)
             eq, al = _normalize_sets(eq, al)
         except Exception as e:
-            falhas.append(
-                {
-                    "manobra": numero,
-                    "erro": str(e),
-                    "situacoes": sorted(situacoes_por_manobra.get(numero) or []),
-                }
-            )
-            eq = set()
-            al = set()
+            falhas.append({
+                "manobra": numero,
+                "erro": str(e),
+                "situacoes": sorted(situacoes_por_manobra.get(numero) or []),
+            })
+            eq, al = set(), set()
 
-        eq_hit = sorted(base_eq.intersection(eq)) if base_eq else []
-        al_hit = sorted(base_al.intersection(al)) if base_al else []
+        eq_hit = sorted(beq.intersection(eq)) if beq else []
+        al_hit = sorted(bal.intersection(al)) if bal else []
         if eq_hit or al_hit:
             conflitos.append((numero, eq_hit, al_hit, sorted(situacoes_por_manobra.get(numero) or [])))
         processed += 1
@@ -242,36 +271,33 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             rate = processed / elapsed if elapsed > 0 else 0.0
             remaining = total - processed
             eta = (remaining / rate) if rate > 0 else 0.0
-            last_ms = now - item_started_at
-            progress_cb(
-                {
-                    "processed": processed,
-                    "total": total,
-                    "elapsed_seconds": elapsed,
-                    "eta_seconds": eta,
-                    "rate_per_min": rate * 60,
-                    "last_seconds": last_ms,
-                    "conflitos": len(conflitos),
-                    "falhas": len(falhas),
-                    "current": numero,
-                }
-            )
+            progress_cb({
+                "processed": processed,
+                "total": total,
+                "elapsed_seconds": elapsed,
+                "eta_seconds": eta,
+                "rate_per_min": rate * 60,
+                "last_seconds": now - item_started_at,
+                "conflitos": len(conflitos),
+                "falhas": len(falhas),
+                "current": numero,
+            })
             last_progress_at = now
 
     finished_at = time.perf_counter()
     return {
         "base": base,
+        "solicitacoes": solicitacoes,
         "data_inicio": data_inicio,
         "data_fim": data_fim,
-        "base_equipamentos": sorted(base_eq),
-        "base_alimentadores": sorted(base_al),
+        "base_equipamentos": sorted(beq),
+        "base_alimentadores": sorted(bal),
+        "conflitos_internos": conflitos_internos,
         "malhas_usadas": malhas,
         "situacoes_usadas": situacoes,
         "situacoes_total": {k: len(v or []) for (k, v) in ids_por_situacao.items()},
         "contagem_por_malha": contagem_por_malha,
         "situacoes_label": {k: SITUACOES_LABEL.get(k, k) for k in situacoes},
-        "total_eb": len(ids_por_situacao.get("EB") or []),
-        "total_en": len(ids_por_situacao.get("EN") or []),
         "total_unico_sem_base": len(todos_unico),
         "conflitos": [
             {
