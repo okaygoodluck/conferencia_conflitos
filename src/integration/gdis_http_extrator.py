@@ -8,7 +8,7 @@ import urllib.request
 from http.cookiejar import CookieJar
 
 
-BASE_URL = "http://gdis-pm/gdispm"
+BASE_URL = "http://gdis-pm.cemig.ad.corp/gdispm"
 
 URL_HOME = f"{BASE_URL}/"
 URL_LOGIN = f"{BASE_URL}/login.jsf"
@@ -19,9 +19,9 @@ URL_MANOBRA = f"{BASE_URL}/pages/manobra/manobraGeral.jsf"
 
 def _http_timeout():
     try:
-        return float((os.getenv("GDIS_HTTP_TIMEOUT") or "15").strip())
+        return float((os.getenv("GDIS_HTTP_TIMEOUT") or "60").strip())
     except:
-        return 15.0
+        return 60.0
 
 
 def _norm(s):
