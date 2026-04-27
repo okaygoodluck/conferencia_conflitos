@@ -9,12 +9,11 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
 # Environment Variables
 .env
 *.env
+atividades.log
+erros.txt
 
 # Virtual Environments
 .venv/
@@ -31,10 +30,17 @@ others/__pycache__/
 temp/
 
 # Data and archives
+data/
+!data/.keep
 *.csv
 *.jsonl
 *.zip
 *.tmp
+.gemini/
+brain/
+skills/
+dist_gdis/
+GDIS_Portatil/
 
 # Playwright & Node
 node_modules/
@@ -43,3 +49,24 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Agent Metadata
+.agent/
+artefacts/
+scratch/
+.gemini/
+brain/
+skills/
+
+# Distributions and Build artifacts
+**/python/
+**/venv/
+**/.venv/
+**/__pycache__/
+**/dist/
+**/build/
+**/*.exe
+**/*.dll
+**/*.so
+**/*.pyc
+**/*.pyo

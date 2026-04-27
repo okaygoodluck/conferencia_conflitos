@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GDIS Platform | Enterprise Hub</title>
+    <link rel="icon" type="image/x-icon" href="/assets/icon_light.ico" />
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="brand">
+                <img src="/assets/icon_light.png" alt="Logo">
+                <h1>GDIS Platform</h1>
+            </div>
+            
+            <nav class="nav-menu">
+                <a class="nav-item active" onclick="showSection('conflitos', this)">
+                    <i data-lucide="zap" class="icon"></i>
+                    <span>Conflitos</span>
+                </a>
+                <a class="nav-item" onclick="showSection('conferidor_manobras', this)">
+                    <i data-lucide="shield-check" class="icon"></i>
+                    <span>Conferidor Manobras</span>
+                </a>
+                <a class="nav-item" onclick="showSection('config', this)">
+                    <i data-lucide="settings" class="icon"></i>
+                    <span>Configurações</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="session-badge">
+                    <span id="status-dot-conf" class="dot offline"></span>
+                    <span>Srv Conflitos</span>
+                </div>
+                <div class="session-badge" style="margin-top: 8px;">
+                    <span id="status-dot-cm" class="dot offline"></span>
+                    <span>Srv Conferidor</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN -->
+        <main class="main-content">
+            <header class="top-nav">
+                <div class="page-title" id="current-page-title">Verificador de Conflitos</div>
+                <div style="font-size: 11px; color: var(--text-muted);">
+                    v2.5.0 | <span id="clock"></span>
+                </div>
+            </header>
+
+            <div class="content-body">
+                
+                <!-- SECTION: CONFLITOS -->
+                <section id="section-conflitos" class="content-section">
+                    <div class="card">
+                        <form id="form-conflitos">
+                            <div class="grid">
+                                <div class="field col-6">
+                                    <label>Manobra Base</label>
+                                    <input type="text" id="conf-manobra" placeholder="Opcional">
+                                </div>
+                                <div class="field col-2">
+                                    <label>Início</label>
+                                    <input type="text" id="conf-di" placeholder="DD/MM/AAAA" maxlength="10">
+                                </div>
+                                <div class="field col-2">
+                                    <label>Fim</label>
+                                    <input type="text" id="conf-df" placeholder="DD/MM/AAAA" maxlength="10">
+                                </div>
+                                
+                                <div class="field col-6">
+                                    <label>Equipamentos</label>
+                                    <input type="text" id="conf-eq-manual" placeholder="Ex: 22-12345">
+                                </div>
+                                <div class="field col-6">
+                                    <label>Alimentadores</label>
+                                    <input type="text" id="conf-al-manual" placeholder="Ex: ERN01">
+                                </div>
+
+                                <div class="field col-12">
+                                    <label>Situações</label>
+                                    <div class="checkgrid">
+                                        <label class="checkitem"><input type="checkbox" name="sit" value="EB" checked> EB</label>
+                                        <label class="checkitem"><input type="checkbox" name="sit" value="EN" checked> EN</label>
+                                        <label class="checkitem"><input type="checkbox" name="sit" value="CO"> CO</label>
+                                        <label class="checkitem"><input type="checkbox" name="sit" value="EA"> EA</label>
+                                    </div>
+                                </div>
+                                <div class="field col-12">
+                                    <label>Malhas</label>
+                                    <div class="checkgrid">
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="CN"> Centro</label>
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="LE"> Leste</label>
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="MQ"> Mantiqueira</label>
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="NT"> Norte</label>
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="SU"> Sul</label>
+                                        <label class="checkitem"><input type="checkbox" name="mal" value="TA"> Triângulo</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+                            <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+                                <button type="submit" id="btn-conf-start" class="btn btn-primary">
+                                    <i data-lucide="rocket"></i> Iniciar Verificação
+                                </button>
+                                <button type="button" id="btn-conf-cancel" class="btn btn-outline" disabled>Parar</button>
+                                <a id="lnk-conf-export" href="#" class="btn btn-outline" style="display:none; text-decoration: none;">
+                                    <i data-lucide="download"></i> Exportar CSV
+                                </a>
+                            </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="pane-conf-status" class="card" style="display:none;">
+                        <div id="txt-conf-main" style="font-weight: 700; font-size: 16px;"></div>
+                        <div id="txt-conf-small" style="color: var(--text-muted); font-size: 12px; margin-top: 8px;"></div>
+                    </div>
+
+                    <div id="pane-conf-results" class="card" style="display:none;">
+                        <div class="progress-container" id="conf-progress-container">
+                            <div class="progress-bar" id="conf-progress-bar"></div>
+                        </div>
+                        <div id="conf-summary-bar" style="margin-bottom: 20px; font-weight: 600; color: var(--primary);"></div>
+                        
+                        <div id="conf-skeleton" class="loading-overlay">
+                            <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width: 20%"></div><div class="skeleton skeleton-cell" style="width: 20%"></div><div class="skeleton skeleton-cell" style="width: 40%"></div><div class="skeleton skeleton-cell" style="width: 20%"></div></div>
+                            <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width: 25%"></div><div class="skeleton skeleton-cell" style="width: 15%"></div><div class="skeleton skeleton-cell" style="width: 35%"></div><div class="skeleton skeleton-cell" style="width: 25%"></div></div>
+                            <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width: 20%"></div><div class="skeleton skeleton-cell" style="width: 30%"></div><div class="skeleton skeleton-cell" style="width: 25%"></div><div class="skeleton skeleton-cell" style="width: 25%"></div></div>
+                            <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width: 30%"></div><div class="skeleton skeleton-cell" style="width: 20%"></div><div class="skeleton skeleton-cell" style="width: 30%"></div><div class="skeleton skeleton-cell" style="width: 20%"></div></div>
+                            <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width: 15%"></div><div class="skeleton skeleton-cell" style="width: 25%"></div><div class="skeleton skeleton-cell" style="width: 40%"></div><div class="skeleton skeleton-cell" style="width: 20%"></div></div>
+                        </div>
+
+                        <table id="conf-table-real">
+                            <thead>
+                                <tr>
+                                    <th>Status / Manobra</th>
+                                    <th>Situações</th>
+                                    <th>Equipamentos</th>
+                                    <th>Alimentadores</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbl-conf-body"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- SECTION: CONFERIDOR MANOBRAS -->
+                <section id="section-conferidor_manobras" class="content-section" style="display:none;">
+                    <div class="card">
+                        <form id="form-conferidor_manobras">
+                            <div class="grid">
+                                <div class="field col-12">
+                                    <label>Manobra Base</label>
+                                    <input type="text" id="cm-manobra" required placeholder="Digite o número da manobra">
+                                </div>
+                            </div>
+                            <div style="margin-top: 24px;">
+                                <button type="submit" id="btn-cm-start" class="btn btn-primary">
+                                    <i data-lucide="search"></i> Conferir Manobra
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="pane-cm-results" style="display:none;">
+                        <div class="progress-container" id="cm-progress-container">
+                            <div class="progress-bar" id="cm-progress-bar"></div>
+                        </div>
+                        <div id="cm-summary-dash" class="summary-dashboard"></div>
+
+                        <div id="cm-skeleton" class="loading-overlay">
+                            <div class="card" style="padding: 20px; margin-bottom: 12px;">
+                                <div class="skeleton skeleton-text" style="width: 40%; margin-bottom: 20px; height: 16px;"></div>
+                                <div class="skeleton skeleton-text" style="width: 90%;"></div>
+                                <div class="skeleton skeleton-text" style="width: 80%;"></div>
+                                <div class="skeleton skeleton-text" style="width: 70%;"></div>
+                            </div>
+                            <div class="card" style="padding: 20px;">
+                                <div class="skeleton skeleton-text" style="width: 30%; margin-bottom: 20px; height: 16px;"></div>
+                                <div class="skeleton skeleton-text" style="width: 85%;"></div>
+                                <div class="skeleton skeleton-text" style="width: 75%;"></div>
+                            </div>
+                        </div>
+
+                        <div id="cm-report-content"></div>
+                    </div>
+                </section>
+
+                <!-- SECTION: CONFIG -->
+                <section id="section-config" class="content-section" style="display:none;">
+                    <div class="card">
+                        <h2 style="margin-bottom: 20px; font-size: 18px;">Credenciais do Sistema GDIS</h2>
+                        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 24px;">
+                            Configure suas credenciais uma única vez. Elas serão sincronizadas entre todos os módulos.
+                        </p>
+                        <div class="grid">
+                            <div class="field col-6">
+                                <label>Usuário GDIS</label>
+                                <input type="text" class="shared-user" id="conf-user" required placeholder="Seu usuário">
+                            </div>
+                            <div class="field col-6">
+                                <label>Senha GDIS</label>
+                                <input type="password" class="shared-pass" id="conf-pass" required placeholder="Sua senha">
+                            </div>
+                        </div>
+                        <div style="margin-top: 40px; padding: 20px; background: rgba(59, 130, 246, 0.05); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.2);">
+                            <p style="font-size: 13px; color: var(--primary);">
+                                <b>Dica:</b> O sistema mantém estas informações apenas durante a sessão ativa no navegador.
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+
+        <!-- CONSOLE DRAWER -->
+        <div id="console-drawer" class="console-drawer">
+            <div class="console-header">
+                <div class="console-tabs">
+                    <div id="tab-conf" class="console-tab active" onclick="switchConsoleView('conf', event)">
+                        <i data-lucide="zap"></i>
+                        <span>Conflitos</span>
+                    </div>
+                    <div id="tab-cm" class="console-tab" onclick="switchConsoleView('reg', event)">
+                        <i data-lucide="shield-check"></i>
+                        <span>Conferidor</span>
+                    </div>
+                </div>
+                <div class="console-controls" onclick="toggleConsole(null, false, event)">
+                    <span style="font-size: 10px; opacity: 0.5; text-transform: uppercase; margin-right: 10px;" class="hide-mobile">Expandir</span>
+                    <i data-lucide="chevron-up" id="console-toggle-icon"></i>
+                </div>
+            </div>
+            <div class="console-body">
+                <div id="term-conf" class="terminal" style="display: block;"></div>
+                <div id="term-cm" class="terminal" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Clock simple impl
+        function updateClock() {
+            const now = new Date();
+            document.getElementById('clock').textContent = now.toLocaleTimeString('pt-BR');
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>

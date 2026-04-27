@@ -1,6 +1,6 @@
 # Verificador de Conflitos de Manobras (GDIS PM)
 
-Aplicação local para verificar conflitos entre uma manobra base e todas as manobras **ELABORADAS (EB)** e **ENVIADAS PARA O CONDIS (EN)** em um período.
+Hub Unificado para Verificação de Conflitos e Conferência de Manobras entre uma manobra base e todas as manobras **ELABORADAS (EB)** e **ENVIADAS PARA O CONDIS (EN)** em um período.
 
 O verificador identifica conflito quando existe interseção por:
 - Equipamentos
@@ -17,7 +17,7 @@ O verificador identifica conflito quando existe interseção por:
 4) Clique em **Iniciar**
 5) Acompanhe o progresso/ETA e exporte CSV ao final
 
-## Regras de comparação
+## Critérios de comparação
 
 ### Equipamentos
 - Comparação por string normalizada completa.
@@ -37,11 +37,17 @@ Veja o exemplo em `.env.example`.
 - `GDIS_PORT` (default `8765`): porta do servidor local
 - `GDIS_HTTP_TIMEOUT` (default `60`): timeout por requisição HTTP ao GDIS
 
+## Conferidor de Manobras
+
+Analisa o roteiro de uma manobra no GDIS e valida contra um conjunto de ~40 critérios de segurança e engenharia.
+
 ## Scripts
 
 **Produção**
 - `app_local.py`: servidor local (localhost)
-- `verificador_conflitos.py`: motor do verificador
+- `verificador_conflitos.py`: motor do verificador de conflitos
+- `conferidor_manobras.py`: motor do conferidor de manobras
+- `server_conferidor_manobras.py`: servidor backend do conferidor
 - `gdis_http_extrator.py`: extrator HTTP/JSF/A4J (sem UI)
 
 **Testes/Legado**
