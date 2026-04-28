@@ -1,0 +1,81 @@
+name: Build and Release GDIS Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Generate Distribution Packages
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate Home Office Package (Portable)
+        shell: powershell
+        run: |
+          ./GERAR_VERSAO_PORTATIL.ps1 -Zip -NoPause
+
+      - name: Generate Server Package
+        shell: powershell
+        run: |
+          $distDir = "PACOTE_PARA_SERVIDOR"
+          if (Test-Path $distDir) { Remove-Item -Recurse -Force $distDir }
+          New-Item -ItemType Directory -Path $distDir -Force
+          New-Item -ItemType Directory -Path "$distDir/src" -Force
+          New-Item -ItemType Directory -Path "$distDir/assets" -Force
+          
+          # Copy essential files
+          Copy-Item -Path "src/*" -Destination "$distDir/src" -Recurse -Exclude "__pycache__"
+          Copy-Item -Path "assets/*" -Destination "$distDir/assets" -Recurse
+          if (Test-Path "data") { 
+            New-Item -ItemType Directory -Path "$distDir/data" -Force
+            Copy-Item -Path "data/*" -Destination "$distDir/data" -Recurse 
+          }
+          
+          Copy-Item -Path "requirements.txt" -Destination "$distDir/"
+          Copy-Item -Path "SERVIDOR_CENTRAL.bat" -Destination "$distDir/"
+          Copy-Item -Path "COMO_CONFIGURAR_SERVIDOR.md" -Destination "$distDir/"
+          
+          # Zip it
+          Compress-Archive -Path "$distDir" -DestinationPath "$distDir.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            GDIS_Plataforma_HomeOffice.zip
+            PACOTE_PARA_SERVIDOR.zip
+          name: Versão ${{ github.ref_name }}
+          body: |
+            ## 🚀 Downloads Disponíveis
+            
+            **Escolha o pacote correto abaixo (Não utilize os links "Source code"):**
+            
+            ### 🏠 1. Versão para Home Office (Usuários)
+            👉 **[Baixe Aqui: GDIS_Plataforma_HomeOffice.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/GDIS_Plataforma_HomeOffice.zip)**
+            - *Uso: Computadores pessoais, notebooks de casa.*
+            - *Vantagem: Já vem com Python e Navegador. Basta extrair e rodar.*
+            
+            ### 🖥️ 2. Versão para Servidor Central (TI)
+            👉 **[Baixe Aqui: PACOTE_PARA_SERVIDOR.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/PACOTE_PARA_SERVIDOR.zip)**
+            - *Uso: Servidor fixo na empresa.*
+            - *Observação: Requer Python instalado no servidor.*
+            
+            ---
+            *Nota: Os arquivos "Source code" abaixo contêm códigos de desenvolvimento e não são necessários para o funcionamento do programa.*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

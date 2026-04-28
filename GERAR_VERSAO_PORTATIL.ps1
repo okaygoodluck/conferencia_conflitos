@@ -90,8 +90,18 @@ pause
 "@
 $batContent | Out-File -FilePath "$packageName\INICIAR_PLATAFORMA_LOCAL.bat" -Encoding ascii
 
+# 9. Criar ZIP se solicitado
+if ($args -contains "-Zip") {
+    Write-Host "[EXTRAS] Criando arquivo ZIP final..." -ForegroundColor Yellow
+    if (Test-Path "$packageName.zip") { Remove-Item "$packageName.zip" }
+    Compress-Archive -Path "$packageName" -DestinationPath "$packageName.zip"
+}
+
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "✅ SUCESSO! PACOTE CRIADO NA PASTA: $packageName" -ForegroundColor Green
-Write-Host "Agora basta ZIPAR essa pasta e disponibilizar para download." -ForegroundColor Green
+Write-Host "✅ SUCESSO! PACOTE GERADO." -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
+
+if (-not ($args -contains "-NoPause")) {
+    pause
+}

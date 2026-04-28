@@ -99,16 +99,33 @@ def _re_macro(m):
     com o código de ação MA18 (ABRIR E SINALIZAR DISJUNTOR/RELIGADOR)."""
     return r'\b\d*' + re.escape(m) + r'\b(?!\s*-\s*OUTROS)'
 
-def _norm_alim_match(s):
-    """Normaliza o alimentador para bater nomes como PZLU008 e PZLU08"""
-    if not s: return ""
-    s = re.sub(r"[^A-Z0-9]", "", str(s).upper())
-    return re.sub(r"([A-Z]+)0+(\d+)", r"\1\2", s)
+def _get_eq_id(eq):
+    """Extrai o ID real do equipamento, lidando com prefixos e sufixos de transformadores."""
+    if not eq or eq == '-': return ""
+    parts = [p.strip() for p in eq.split('-')]
+    if len(parts) == 1: return parts[0]
+    
+    # Caso especial: Transformadores ID - Fases - kVA (ex: 191234 - 3 - 75)
+    # Se a primeira parte tem 5 ou 6 dígitos, ela é o ID
+    if len(parts[0]) >= 5 and parts[0].isdigit():
+        return parts[0]
+    
+    # Caso padrão: Prefixo - ID (ex: 22 - 313300 ou 28 - 12345)
+    # Se a primeira parte é curta (prefixo de 2-3 dígitos) e a segunda é longa, a segunda é o ID
+    if len(parts) >= 2 and len(parts[1]) >= 4:
+        return parts[1]
+        
+    # Fallback: se houver apenas um hífen e a primeira parte for curta, pega a segunda
+    if len(parts) == 2 and len(parts[0]) <= 3:
+        return parts[1]
+        
+    # Último caso: pega a última parte (comportamento original)
+    return parts[-1]
 
 def _get_eq_data(dados, eq, alim1, alim2="", local=""):
     """Busca os dados do equipamento resolvendo conflitos pelo NUMERO-LOCAL ou Alimentador"""
     
-    num_only = eq.split('-')[-1].strip() if '-' in eq else eq
+    num_only = _get_eq_id(eq)
     lista = []
     
     # 1. TENTA POR NUMERO-LOCAL (Mais específico)
@@ -1337,10 +1354,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             
             if eq not in manobra_map:
                 # Fallback 1: tentar casar ignorando prefixos (e.g. "24 - 12345" na solicitação, "12345" na manobra)
-                eq_sem_prefixo = eq.split('-')[-1].strip() if '-' in eq else eq
+                eq_sem_prefixo = _get_eq_id(eq)
                 encontrou_fallback = False
                 for k in manobra_map.keys():
-                    k_sem_prefixo = k.split('-')[-1].strip() if '-' in k else k
+                    k_sem_prefixo = _get_eq_id(k)
                     if eq_sem_prefixo == k_sem_prefixo:
                         eq = k
                         encontrou_fallback = True
@@ -1420,7 +1437,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         # REGRA 31: ESTADO DO EQUIPAMENTO
         # Verifica se o equipamento está sendo aberto/fechado em coerência com seu estado atual no Gemini
 
-        prefixo = "01" if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq) else (eq.split('-')[0].strip() if '-' in eq else "")
+        # Identifica o prefixo do equipamento para aplicar regras específicas (Ex: 01=Trafo, 22=Religador)
+        # Regex lida com transformadores ID - Fases - kVA
+        is_trafo = bool(re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq))
+        prefixo = "01" if is_trafo else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
         is_alim = bool(re.search(r'[A-Za-z]', eq)) and ('-' not in eq)
 
         # REGRA 6 (Incompatibilidade de Ação pelo Prefixo)
@@ -1867,7 +1887,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         
         # Obtém prefixo do equipamento para inverter MA77 corretamente (Regra 22)
         eq_info_rule22 = _get_eq_data(dados_equipamentos, eq, next((mi.get('alim','') for mi in manobra_items), ''))
-        prefixo_eq = eq.split('-')[0].strip().zfill(2) if '-' in eq else ""
+        prefixo_eq = "01" if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq) else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
         
         # REGRA 2 (Ação Inicial de Abertura) - Apenas para equipamentos da solicitação
         if eq in sol_dict:

@@ -26,6 +26,31 @@ def _norm_eqpto(s):
     return _norm_spaces(s)
 
 
+def _get_eq_id(eq_name):
+    """Extrai o ID do equipamento de forma robusta."""
+    if not eq_name or not isinstance(eq_name, str):
+        return eq_name
+    
+    # Normaliza espaços e hífens primeiro
+    ne = _norm_eqpto(eq_name)
+    parts = [p.strip() for p in ne.split("-") if p.strip()]
+    if not parts:
+        return ne
+    
+    # Caso 1: Formato Transformador '191234 - 3 - 75'
+    # Se a primeira parte tem 5 ou 6 dígitos, é o ID.
+    if len(parts[0]) in [5, 6] and parts[0].isdigit():
+        return parts[0]
+    
+    # Caso 2: Formato com prefixo curto '01-123456'
+    if len(parts) > 1:
+        if len(parts[0]) <= 3 and parts[1].isdigit() and len(parts[1]) >= 4:
+            return parts[1]
+            
+    # Caso 3: Padrão fallback (última parte)
+    return parts[-1]
+
+
 def _norm_alim(s):
     s = (s or "").upper()
     s = re.sub(r"[^A-Z0-9]", "", s)
@@ -70,7 +95,9 @@ def _normalize_sets(eqptos, alims):
     for e in eqptos or []:
         ne = _norm_eqpto(e)
         if ne and ne != "-" and ne != " - " and not ne.upper().startswith("ETAPA"):
-            eq_out.add(ne)
+            # Extrai o ID para garantir o cruzamento correto (especialmente para transformadores)
+            eid = _get_eq_id(ne)
+            eq_out.add(eid)
 
     al_out = set()
     for a in alims or []:

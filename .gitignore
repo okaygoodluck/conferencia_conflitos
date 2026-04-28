@@ -36,6 +36,8 @@ data/
 *.jsonl
 *.zip
 *.tmp
+GDIS_Plataforma_HomeOffice/
+PACOTE_PARA_SERVIDOR/
 .gemini/
 brain/
 skills/
