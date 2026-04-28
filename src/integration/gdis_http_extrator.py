@@ -186,8 +186,14 @@ def _parse_itens_tables(html_text):
         table_html = t.group(2)
         ths = re.findall(r"<th[^>]*>([\s\S]*?)</th>", table_html, flags=re.IGNORECASE)
         headers = [_strip_tags(x).lower() for x in ths]
-        # Equipamento pode ser 'Equipamento', 'Eqpto', 'Trafo', 'Código', 'Número', etc.
-        idx_eq = next((i for i, h in enumerate(headers) if any(k in h for k in ["equip", "eqp", "trafo", "transformador", "número", "númer", "numer", "nº", "código", "codigo"])), -1)
+        # Prioridade para nomes de colunas que são claramente equipamentos
+        eq_keywords_high = ["equip", "eqp", "trafo", "transformador"]
+        eq_keywords_low = ["número", "númer", "numer", "nº", "código", "codigo"]
+        
+        idx_eq = next((i for i, h in enumerate(headers) if any(k in h for k in eq_keywords_high)), -1)
+        if idx_eq < 0:
+            idx_eq = next((i for i, h in enumerate(headers) if any(k in h for k in eq_keywords_low)), -1)
+        
         # Alimentador pode ser 'Alimentador', 'Subestação', 'Alim.' ou 'Sub.'
         idx_al = next((i for i, h in enumerate(headers) if any(k in h for k in ["alimen", "subes", "alim", "sub"])), -1)
         if idx_eq < 0 and idx_al < 0:
@@ -223,8 +229,13 @@ def _parse_eventos(html_text):
         al.add(m.group(1).strip())
     
     # Fallback para menções diretas em texto (caso não usem as tags [])
-    # Ex: "EQUIPAMENTO: 24-12345" ou "OPERAR EQPTO 24-12345"
-    for m in re.finditer(r"(?:EQUIPAMENTO|EQPTO|EQP|CÓDIGO|CODIGO|TRAFO|TRANSFORMADOR)\s*[:\-]?\s*(\d{2}\s*-\s*\d{5,8}|\d{5,6}\s*-\s*\d+\s*-\s*\d+)", txt, re.IGNORECASE):
+    # Ex: "EQUIPAMENTO: 24-12345" ou "OPERAR EQPTO 24-12345" ou "TRAFO 62326-3-75"
+    # Padrão Transformador: XXXXX-X-XXX (ex: 62326-3-75)
+    trafo_regex = r"\d{4,8}\s*-\s*\d+\s*-\s*\d+"
+    classico_regex = r"\d{2}\s*-\s*\d{5,8}"
+    combined_regex = f"(?:{classico_regex}|{trafo_regex})"
+    
+    for m in re.finditer(r"(?:EQUIPAMENTO|EQPTO|EQP|CÓDIGO|CODIGO|TRAFO|TRANSFORMADOR)\s*[:\-]?\s*(" + combined_regex + ")", txt, re.IGNORECASE):
         eq.add(m.group(1).strip())
         
     return sorted(eq), sorted(al)
@@ -232,10 +243,12 @@ def _parse_eventos(html_text):
 def _super_fallback_equipamentos(html_text):
     """Busca agressiva por padrões de equipamentos no HTML bruto se nada for achado."""
     eqpts = set()
-    # Padrão GDIS clássico: "24-12345" ou "24 - 12345" (2 dígitos, hífen opcional, 5+ dígitos)
+    # Padrão GDIS clássico: "24-12345" ou "24 - 12345"
     # Padrão Transformador: "62326 - 3 - 75" ou "254366 - 3 - 150"
-    # Evitamos capturar datas verificando se não há / por perto ou se o padrão é longo o suficiente
-    for m in re.finditer(r"\b(\d{2}\s*-\s*\d{5,8}|\d{5,6}\s*-\s*\d+\s*-\s*\d+)\b", html_text or ""):
+    trafo_regex = r"\d{4,8}\s*-\s*\d+\s*-\s*\d+"
+    classico_regex = r"\d{2}\s*-\s*\d{5,8}"
+    
+    for m in re.finditer(r"\b(" + classico_regex + "|" + trafo_regex + r")\b", html_text or ""):
         eqpts.add(m.group(1).strip())
     return sorted(eqpts)
 
