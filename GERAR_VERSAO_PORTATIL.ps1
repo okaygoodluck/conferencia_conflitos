@@ -27,10 +27,11 @@ Remove-Item "python_embed.zip"
 Write-Host "[2/6] Configurando ambiente Python..."
 $pthFile = Get-ChildItem "$packageName\python\python*._pth" | Select-Object -First 1
 $content = Get-Content $pthFile.FullName
-# Adiciona Lib\site-packages e ativa o site module
+# Adiciona Lib\site-packages, o diretório pai (..) e ativa o site module
 $newContent = @()
 foreach ($line in $content) {
     if ($line -eq "#import site") {
+        $newContent += ".."
         $newContent += "Lib\site-packages"
         $newContent += "import site"
     } else {
@@ -69,6 +70,9 @@ setlocal
 title GDIS PLATFORM - HOME OFFICE
 cd /d "%~dp0"
 
+:: Garante que o Python encontre os modulos na pasta src
+set PYTHONPATH=%~dp0
+
 :: Configura o caminho do navegador para ser LOCAL (nao no AppData do usuario)
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0pw-browsers
 
@@ -78,6 +82,7 @@ echo      INICIALIZANDO GDIS PLATFORM (VERSAO PORTATIL)
 echo ============================================================
 echo.
 
+:: Inicia o backend minimizado
 start "GDIS BACKEND" /min "%~dp0python\python.exe" -m src.api.app_unificado
 
 timeout /t 5 /nobreak >nul
