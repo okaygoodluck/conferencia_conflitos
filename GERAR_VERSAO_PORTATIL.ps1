@@ -13,15 +13,9 @@ Write-Host "      GERANDO VERSÃO PORTÁTIL PARA HOME OFFICE" -ForegroundColor C
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # 1. Criar pasta do pacote
-<<<<<<< HEAD
 if (Test-Path $packageName) { Remove-Item -Recurse -Force $packageName }
 New-Item -ItemType Directory -Path $packageName -Force | Out-Null
 New-Item -ItemType Directory -Path "$packageName\python" -Force | Out-Null
-=======
-if (Test-Path $packageName) { Remove-Item -Recururse -Force $packageName }
-New-Item -ItemType Directory -Path $packageName | Out-Null
-New-Item -ItemType Directory -Path "$packageName\python" | Out-Null
->>>>>>> b8f3983cafdb7dc577e7b2694d048191bae4682b
 
 # 2. Baixar Python Embeddable
 Write-Host "[1/6] Baixando Python Portátil ($pythonVersion)..."
@@ -33,18 +27,11 @@ Remove-Item "python_embed.zip"
 Write-Host "[2/6] Configurando ambiente Python..."
 $pthFile = Get-ChildItem "$packageName\python\python*._pth" | Select-Object -First 1
 $content = Get-Content $pthFile.FullName
-<<<<<<< HEAD
 # Adiciona Lib\site-packages, o diretório pai (..) e ativa o site module
 $newContent = @()
 foreach ($line in $content) {
     if ($line -eq "#import site") {
         $newContent += ".."
-=======
-# Adiciona Lib\site-packages e ativa o site module
-$newContent = @()
-foreach ($line in $content) {
-    if ($line -eq "#import site") {
->>>>>>> b8f3983cafdb7dc577e7b2694d048191bae4682b
         $newContent += "Lib\site-packages"
         $newContent += "import site"
     } else {
@@ -83,12 +70,8 @@ setlocal
 title GDIS PLATFORM - HOME OFFICE
 cd /d "%~dp0"
 
-<<<<<<< HEAD
 :: Garante que o Python encontre os modulos na pasta src
 set PYTHONPATH=%~dp0
-
-=======
->>>>>>> b8f3983cafdb7dc577e7b2694d048191bae4682b
 :: Configura o caminho do navegador para ser LOCAL (nao no AppData do usuario)
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0pw-browsers
 
@@ -98,10 +81,7 @@ echo      INICIALIZANDO GDIS PLATFORM (VERSAO PORTATIL)
 echo ============================================================
 echo.
 
-<<<<<<< HEAD
 :: Inicia o backend minimizado
-=======
->>>>>>> b8f3983cafdb7dc577e7b2694d048191bae4682b
 start "GDIS BACKEND" /min "%~dp0python\python.exe" -m src.api.app_unificado
 
 timeout /t 5 /nobreak >nul
@@ -114,7 +94,6 @@ pause
 "@
 $batContent | Out-File -FilePath "$packageName\INICIAR_PLATAFORMA_LOCAL.bat" -Encoding ascii
 
-<<<<<<< HEAD
 # 9. Criar ZIP se solicitado
 if ($args -contains "-Zip") {
     Write-Host "[EXTRAS] Criando arquivo ZIP final..." -ForegroundColor Yellow
@@ -130,10 +109,3 @@ Write-Host "============================================================" -Foreg
 if (-not ($args -contains "-NoPause")) {
     pause
 }
-=======
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host "✅ SUCESSO! PACOTE CRIADO NA PASTA: $packageName" -ForegroundColor Green
-Write-Host "Agora basta ZIPAR essa pasta e disponibilizar para download." -ForegroundColor Green
-Write-Host "============================================================" -ForegroundColor Green
->>>>>>> b8f3983cafdb7dc577e7b2694d048191bae4682b
