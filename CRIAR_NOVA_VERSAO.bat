@@ -33,7 +33,7 @@ echo Criando tag %TAG%...
 git add .
 git commit -m "Release %TAG%"
 git tag -a %TAG% -m "Versao %TAG%"
-git push origin main
+git push origin HEAD
 git push origin %TAG%
 
 echo.

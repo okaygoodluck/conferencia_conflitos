@@ -144,7 +144,7 @@ def main():
         print("    Aguardando o carregamento dos painéis (Serviços, Locais, etc)...")
         page.wait_for_timeout(6000)
 
-        texto_puro = page.evaluate("() => document.body.innerText")
+        texto_puro = page.evaluate("() => document.body ? document.body.innerText : ''")
         
         # Extrai todas as tabelas e formata as colunas com ' | ' para fácil visualização
         tabelas_texto = page.evaluate("""() => {

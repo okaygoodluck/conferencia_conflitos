@@ -622,7 +622,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         print("    Extraindo dados gerais da Solicitação (Bloqueio de RA)...")
         solicitacao_bloqueio_ra = page.evaluate(JS_EXTRACT_RA)
-        solicitacao_texto_puro = page.evaluate("() => document.body.innerText")
+        solicitacao_texto_puro = page.evaluate("() => document.body ? document.body.innerText : ''")
 
         print("    Extraindo datas da Solicitação (Início/Término)...")
         solicitacao_datas = page.evaluate("""() => {

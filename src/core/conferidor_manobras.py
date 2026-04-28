@@ -789,7 +789,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             }
             return null; // Retorna null para acionar o fallback do Python
         }""")
-        solicitacao_texto_puro = page.evaluate("() => document.body.innerText")
+        solicitacao_texto_puro = page.evaluate("() => document.body ? document.body.innerText : ''")
 
         print("    Extraindo datas da Solicitação (Início/Término)...")
         solicitacao_datas = page.evaluate("""() => {
