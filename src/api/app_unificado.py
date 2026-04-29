@@ -10,6 +10,7 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 import urllib.request
 import urllib.error
+import webbrowser
 
 # Configuração
 PORT_HUB = 8765
@@ -21,9 +22,13 @@ def _app_dir():
 
 def _is_server_alive(port):
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/health", timeout=1) as resp:
+        # Usa 127.0.0.1 em vez de localhost para evitar problemas com IPv6 no Windows
+        # Aumentamos o timeout para 2s para ser mais tolerante
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
             return resp.status == 200
-    except:
+    except Exception as e:
+        # Se quiser debugar o motivo do offline, descomente a linha abaixo:
+        # print(f"[DEBUG] Health check falhou na porta {port}: {e}")
         return False
 
 def _start_backend(name, script_name, port):
@@ -83,6 +88,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(e.read())
         except Exception as e:
+            print(f"[ERRO PROXY] Falha ao encaminhar requisição para {target_url}: {e}")
             self.send_response(503)
             self.end_headers()
             self.wfile.write(f"Erro no Proxy: {e}".encode())
@@ -117,14 +123,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Roteamento Conflitos
         if u.path.startswith("/conflitos/"):
             sub_path = u.path[len("/conflitos"):]
-            target = f"http://localhost:{PORT_CONFLITOS}{sub_path}"
+            target = f"http://127.0.0.1:{PORT_CONFLITOS}{sub_path}"
             if u.query: target += f"?{u.query}"
             return self._proxy_request(target)
 
         # Roteamento Conferidor
         if u.path.startswith("/conferidor_manobras/"):
             sub_path = u.path[len("/conferidor_manobras"):]
-            target = f"http://localhost:{PORT_CONFERIDOR}{sub_path}"
+            target = f"http://127.0.0.1:{PORT_CONFERIDOR}{sub_path}"
             if u.query: target += f"?{u.query}"
             return self._proxy_request(target)
             
@@ -149,12 +155,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Roteamento Conflitos
         if u.path.startswith("/conflitos/"):
             sub_path = u.path[len("/conflitos"):]
-            return self._proxy_request(f"http://localhost:{PORT_CONFLITOS}{sub_path}")
+            return self._proxy_request(f"http://127.0.0.1:{PORT_CONFLITOS}{sub_path}")
 
         # Roteamento Conferidor
         if u.path.startswith("/conferidor_manobras/"):
             sub_path = u.path[len("/conferidor_manobras"):]
-            return self._proxy_request(f"http://localhost:{PORT_CONFERIDOR}{sub_path}")
+            return self._proxy_request(f"http://127.0.0.1:{PORT_CONFERIDOR}{sub_path}")
 
         # Restart Commands
         if u.path == "/hub/restart_conflitos":
@@ -180,6 +186,25 @@ def main():
     
     print(f"\nPlataforma unificada pronta em http://localhost:{PORT_HUB}")
     print("Mantenha esta janela aberta. Ela gerencia a comunicação e as outras janelas.")
+    
+    # Abre o browser automaticamente
+    def _open_browser():
+        url = f"http://127.0.0.1:{PORT_HUB}"
+        print(f"\n[INFO] Tentando abrir o navegador em {url}...")
+        try:
+            # Tenta via biblioteca padrão
+            if not webbrowser.open(url):
+                raise Exception("webbrowser.open retornou False")
+        except Exception as e:
+            # Fallback agressivo para Windows
+            print(f"[AVISO] Falha ao abrir via Python ({e}). Tentando comando de sistema...")
+            try:
+                os.system(f'start "" "{url}"')
+            except:
+                print("[ERRO] Não foi possível abrir o navegador automaticamente.")
+                print(f"       Por favor, acesse manualmente: {url}")
+
+    threading.Timer(2.0, _open_browser).start()
     
     try:
         server = _ThreadedServer(("0.0.0.0", PORT_HUB), ProxyHandler)

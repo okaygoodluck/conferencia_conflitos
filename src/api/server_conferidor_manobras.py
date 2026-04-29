@@ -73,6 +73,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
+        # Log simplificado para health checks
+        if u.path != "/health":
+            _log(f"GET {u.path}")
+            
         if u.path == "/health":
             return self._send_json(HTTPStatus.OK, {"status": "ok", "service": "conferidor_manobras"})
 
@@ -89,6 +93,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        _log(f"POST {u.path}")
         length = int(self.headers.get("Content-Length") or "0")
         body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
 
@@ -108,26 +113,33 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+def _async_load_cache():
+    _log("[INFO] Iniciando carregamento da base de equipamentos em segundo plano...")
+    try:
+        data = conferidor_manobras._carregar_dados_equipamentos()
+        with STATE_LOCK:
+            CACHE["equipamentos"] = data
+        _log(f"[OK] Base de equipamentos carregada! ({len(data)} itens)")
+    except Exception as e:
+        _log(f"[ERRO] Falha ao carregar cache: {e}")
+
 def main():
     port = 8767
     print("="*60)
     print(f"   SERVIÇO CONFERIDOR DE MANOBRAS (Porta {port})")
     print("="*60)
     
-    # Pré-carrega a base de equipamentos para o Cache (evita carregar em cada requisição)
-    print("\n[INFO] Pré-carregando base de equipamentos no Cache...")
-    try:
-        CACHE["equipamentos"] = conferidor_manobras._carregar_dados_equipamentos()
-        print(f"[OK] Base carregada! ({len(CACHE['equipamentos'])} equipamentos na memória)")
-    except Exception as e:
-        print(f"[AVISO] Erro ao carregar cache inicial: {e}")
+    # Inicia o carregamento pesado em background para liberar a porta 8767 imediatamente
+    threading.Thread(target=_async_load_cache, daemon=True).start()
 
     try:
-        httpd = _ThreadedServer(("0.0.0.0", port), Handler)
-        print(f"\n[START] Servidor pronto e aguardando conexões na porta {port}...")
+        # Forçamos 127.0.0.1 para evitar problemas de resolução localhost/IPv6 no Windows
+        httpd = _ThreadedServer(("127.0.0.1", port), Handler)
+        print(f"\n[START] Servidor aberto em http://127.0.0.1:{port}")
+        print("[INFO] A porta já está ativa. O Hub Central já deve reconhecer o serviço.")
         httpd.serve_forever()
     except Exception as e:
-        print(f"Erro: {e}")
+        print(f"Erro fatal ao iniciar servidor: {e}")
         input("Pressione Enter para fechar...")
 
 if __name__ == "__main__":

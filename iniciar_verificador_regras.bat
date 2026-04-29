@@ -1,8 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set REGRAS_PORT=8766
-
-start "Verificador de Manobras" python -m src.api.app_regras_local
+set GDIS_PORT=8765
+start "Plataforma GDIS" python -m src.api.app_unificado
 timeout /t 1 /nobreak >nul
-start "" "http://127.0.0.1:%REGRAS_PORT%/"
+start "" "http://127.0.0.1:%GDIS_PORT%/"

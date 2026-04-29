@@ -58,10 +58,13 @@ echo.
 echo LINK DE ACESSO PARA OS USUARIOS (INTERNO / HOME OFFICE):
 echo http://%IP%:%GDIS_PORT%/
 echo.
+echo DICA: Se estiver rodando para uso pessoal e o navegador nao abrir,
+echo use o script 'iniciar_plataforma_gdis.bat'.
+echo.
 echo Mantenha esta janela aberta para manter o servidor online.
 echo ============================================================
 echo.
 
-:: Nao abre o navegador automaticamente para nao poluir o servidor
-:: Mas deixa o link visivel para o administrador
+:: Nao abre o navegador automaticamente para nao poluir o servidor (se for rodar via VPN/Rede)
+:: Mas o backend (app_unificado) tentara abrir via localhost após 2 segundos.
 pause
