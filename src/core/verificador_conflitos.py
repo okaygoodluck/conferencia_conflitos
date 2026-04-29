@@ -27,28 +27,20 @@ def _norm_eqpto(s):
 
 
 def _get_eq_id(eq_name):
-    """Extrai o ID do equipamento de forma robusta."""
+    """Extrai o ID do equipamento de forma robusta, preservando prefixos e sufixos únicos."""
     if not eq_name or not isinstance(eq_name, str):
         return eq_name
     
-    # Normaliza espaços e hífens primeiro
-    ne = _norm_eqpto(eq_name)
-    parts = [p.strip() for p in ne.split("-") if p.strip()]
-    if not parts:
-        return ne
+    # 1. Converte para maiúsculo e remove termos genéricos do início
+    s = eq_name.upper().strip()
+    s = re.sub(r"^(EQUIPAMENTO|EQPTO|EQP|CÓDIGO|CODIGO|TRAFO|TRANSFORMADOR|Nº|NUMERO|NUMBER)\s*[:\-]?\s*", "", s)
     
-    # Caso 1: Formato Transformador '191234 - 3 - 75'
-    # Se a primeira parte tem 5 ou 6 dígitos, é o ID.
-    if len(parts[0]) in [5, 6] and parts[0].isdigit():
-        return parts[0]
+    # 2. Normaliza espaços e hífens para um padrão único colado (para comparação exata)
+    # Isso garante que '62326 - 3 - 75' e '62326-3-75' sejam o mesmo ID interno.
+    s = re.sub(r"\s*-\s*", "-", s)
+    s = re.sub(r"\s+", " ", s).strip()
     
-    # Caso 2: Formato com prefixo curto '01-123456'
-    if len(parts) > 1:
-        if len(parts[0]) <= 3 and parts[1].isdigit() and len(parts[1]) >= 4:
-            return parts[1]
-            
-    # Caso 3: Padrão fallback (última parte)
-    return parts[-1]
+    return s
 
 
 def _norm_alim(s):
