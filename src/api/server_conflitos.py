@@ -199,6 +199,7 @@ def main():
     print("="*60)
     try:
         httpd = _ThreadedServer(("0.0.0.0", port), Handler)
+        print(f"\n[START] Servidor pronto e aguardando conexões na porta {port}...")
         httpd.serve_forever()
     except Exception as e:
         print(f"Erro: {e}")

@@ -135,13 +135,17 @@ def _carregar_dados_equipamentos():
     import json
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     caminho_csv_local = os.path.join(root_dir, "data", "equipamentos_gemini.csv")
-    caminho_csv_rede = r"I:\IT\ODCO\PUBLICA\Kennedy\Projetos\dados Gemini\equipamentos_gemini.csv"
+    caminho_csv_rede = r"I:\IT\ODCO\PROGRAMACAO_MT\1 - Sistemas da programação\Data_Gemini\equipamentos_gemini.csv"
     
-    caminho_csv = caminho_csv_local if os.path.exists(caminho_csv_local) else caminho_csv_rede
+    # Prioriza o caminho de rede para garantir centralização, fallback para local se rede inacessível
+    if os.path.exists(caminho_csv_rede):
+        caminho_csv = caminho_csv_rede
+    else:
+        caminho_csv = caminho_csv_local
     
     dados = {}
     if not os.path.exists(caminho_csv):
-        print(f"⚠️  Aviso: Arquivo CSV não encontrado (Regras 7, 31 e 32 ignoradas):\n   {caminho_csv}")
+        print(f"[AVISO] Arquivo CSV não encontrado (Regras 7, 31 e 32 ignoradas):\n   {caminho_csv}")
         return dados
         
     try:
@@ -217,7 +221,7 @@ def _carregar_dados_equipamentos():
                     dados[num_local].append(record)
                     
     except Exception as e:
-        print(f"⚠️  Aviso: Erro ao carregar dados do CSV: {e}")
+        print(f"[AVISO] Erro ao carregar dados do CSV: {e}")
         
     return dados
 
@@ -236,10 +240,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     usuario = usuario_param if usuario_param else ((os.getenv("GDIS_USUARIO") or "").strip() or input("Usuário: ").strip())
     senha = senha_param if senha_param else ((os.getenv("GDIS_SENHA") or "").strip() or getpass.getpass("Senha: "))
 
-    print("\n⏳ Carregando base de equipamentos... (O primeiro acesso pode levar alguns segundos)")
+    print("\n[INFO] Carregando base de equipamentos... (O primeiro acesso pode levar alguns segundos)")
     regras_equipamentos = _obter_regras_equipamentos()
     dados_equipamentos = _carregar_dados_equipamentos()
-    print("✅ Base carregada com sucesso!")
+    print("[OK] Base carregada com sucesso!")
 
     print("\n[1] Iniciando navegador...")
     with sync_playwright() as p:

@@ -115,16 +115,16 @@ def main():
     print("="*60)
     
     # Pré-carrega a base de equipamentos para o Cache (evita carregar em cada requisição)
-    print("\n⏳ Pré-carregando base de equipamentos no Cache...")
+    print("\n[INFO] Pré-carregando base de equipamentos no Cache...")
     try:
         CACHE["equipamentos"] = conferidor_manobras._carregar_dados_equipamentos()
-        print(f"✅ Base carregada! ({len(CACHE['equipamentos'])} equipamentos na memória)")
+        print(f"[OK] Base carregada! ({len(CACHE['equipamentos'])} equipamentos na memória)")
     except Exception as e:
-        print(f"⚠️ Erro ao carregar cache inicial: {e}")
+        print(f"[AVISO] Erro ao carregar cache inicial: {e}")
 
     try:
         httpd = _ThreadedServer(("0.0.0.0", port), Handler)
-        print(f"\n🚀 Servidor pronto e aguardando conexões na porta {port}...")
+        print(f"\n[START] Servidor pronto e aguardando conexões na porta {port}...")
         httpd.serve_forever()
     except Exception as e:
         print(f"Erro: {e}")
