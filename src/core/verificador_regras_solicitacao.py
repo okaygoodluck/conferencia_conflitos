@@ -22,6 +22,12 @@ def _norm_str(s):
     s = re.sub(r"\s+", " ", str(s)).strip().upper()
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
+def _norm_alim_match(s):
+    """Normaliza o nome do alimentador para comparação (remove espaços e caracteres especiais)"""
+    if not s: return ""
+    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
+
+
 def _re_macro(m):
     r"""Constrói regex para detectar a macro 'm' no texto, excluindo variantes 'MA18 - Outros'.
     O lookahead negativo (?!\s*-\s*OUTROS) garante que 'MA18 - OUTROS' não seja confundido
@@ -54,6 +60,11 @@ def _get_eq_id(eq):
 def _get_eq_data(dados, eq, alim1, alim2="", local=""):
     """Busca os dados do equipamento resolvendo conflitos pelo NUMERO-LOCAL ou Alimentador"""
     
+    # Normalização definida localmente para garantir escopo em qualquer contexto de execução
+    def _norm(s):
+        import re as _re
+        return _re.sub(r"[^A-Z0-9]", "", str(s).upper()) if s else ""
+
     num_only = _get_eq_id(eq)
     lista = []
     
@@ -84,8 +95,8 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
         # print(f"      [DEBUG EQ] Único candidato para {eq}: {lista[0].get('alimentador')} | Local: {lista[0].get('numero_local')}")
         return lista[0]
     
-    a1 = _norm_alim_match(alim1)
-    a2 = _norm_alim_match(alim2)
+    a1 = _norm(alim1)
+    a2 = _norm(alim2)
     
     # print(f"      [DEBUG EQ] Múltiplos candidatos ({len(lista)}) para {eq}. Alvos norm: {a1} / {a2}")
     
@@ -93,12 +104,12 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
         for item in lista:
             alims_item = item.get('alimentadores') or [item.get('alimentador')]
             for alim_orig in alims_item:
-                if _norm_alim_match(alim_orig) == a1: return item
+                if _norm(alim_orig) == a1: return item
     if a2:
         for item in lista:
             alims_item = item.get('alimentadores') or [item.get('alimentador')]
             for alim_orig in alims_item:
-                if _norm_alim_match(alim_orig) == a2: return item
+                if _norm(alim_orig) == a2: return item
             
     # Último caso: Retorna o primeiro da lista de candidatos detectados
     # print(f"      [DEBUG EQ] Nenhum alimentador casou. Retornando primeiro da lista: {lista[0].get('alimentador')}")

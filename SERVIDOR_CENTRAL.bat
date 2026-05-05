@@ -43,9 +43,11 @@ if %errorlevel% neq 0 (
 python -m playwright install chromium
 
 echo [3/3] Iniciando Servicos...
-:: Encerra processos antigos na porta para evitar conflitos
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :%GDIS_PORT%') do (
-    taskkill /f /pid %%a >nul 2>&1
+:: Encerra processos antigos nas portas para evitar conflitos (Hub, Conflitos, Conferidor)
+for %%p in (8765 8766 8767) do (
+    for /f "tokens=5" %%a in ('netstat -aon ^| findstr :%%p ^| findstr LISTENING') do (
+        taskkill /f /pid %%a >nul 2>&1
+    )
 )
 
 :: Inicia o App Unificado em segundo plano (novo console)

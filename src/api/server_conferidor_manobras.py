@@ -5,6 +5,9 @@ import time
 import uuid
 import sys
 import io
+import traceback
+import importlib
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -14,8 +17,14 @@ from urllib.parse import parse_qs, urlparse
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if root_dir not in sys.path:
     sys.path.append(root_dir)
+print(f"[DEBUG] sys.path: {sys.path}")
 
 from src.core import conferidor_manobras
+print(f"[DEBUG] conferidor_manobras file: {conferidor_manobras.__file__}")
+print(f"[DEBUG] _norm_alim_match in conferidor_manobras: {'_norm_alim_match' in dir(conferidor_manobras)}")
+if hasattr(conferidor_manobras, '_get_eq_data'):
+    import inspect
+    print(f"[DEBUG] _get_eq_data source file: {inspect.getfile(conferidor_manobras._get_eq_data)}")
 
 # --- ESTADO ---
 STATE_LOCK = threading.Lock()
@@ -40,6 +49,21 @@ def _run_conferidor(job_id, manobra, user, passwd):
         # Passa o cache se disponível para evitar recarregar o CSV de 40MB
         with STATE_LOCK: eq_cache = CACHE["equipamentos"]
         
+        thread_log(f"[DEBUG] conferidor_manobras file: {conferidor_manobras.__file__}")
+        thread_log(f"[DEBUG] _norm_alim_match in conferidor_manobras: {'_norm_alim_match' in dir(conferidor_manobras)}")
+        if hasattr(conferidor_manobras, '_get_eq_data'):
+            import inspect
+            thread_log(f"[DEBUG] _get_eq_data source file: {inspect.getfile(conferidor_manobras._get_eq_data)}")
+        
+        # Forçar recarregamento dos módulos de núcleo para evitar execução de código cacheado
+        import src.core.conferidor_manobras
+        import src.core.verificador_regras_solicitacao
+        importlib.reload(src.core.conferidor_manobras)
+        importlib.reload(src.core.verificador_regras_solicitacao)
+        
+        # Telemetria de depuração
+        thread_log(f"[{datetime.now().strftime('%H:%M:%S')}] [DEBUG] Módulo carregado de: {src.core.conferidor_manobras.__file__}")
+        
         conferidor_manobras.main(
             manobra_param=manobra, 
             usuario_param=user, 
@@ -50,8 +74,9 @@ def _run_conferidor(job_id, manobra, user, passwd):
         )
         with STATE_LOCK: STATE[job_id]["state"] = "done"
     except Exception as e:
+        tb = traceback.format_exc()
         with STATE_LOCK: STATE[job_id].update({"state": "error", "error": str(e)})
-        _log(f"ERRO: {e}", log_func=thread_log)
+        _log(f"ERRO: {e}\n--- TRACEBACK COMPLETO ---\n{tb}", log_func=thread_log)
     finally:
         pass
 

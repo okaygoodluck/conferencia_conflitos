@@ -16,6 +16,10 @@ function showSection(id, btn) {
         setTimeout(() => target.classList.add('active'), 10);
     }
     
+    // Sincroniza o console com a aba selecionada
+    const consoleContext = (id === 'conferidor_manobras') ? 'cm' : 'conf';
+    switchConsoleView(consoleContext);
+
     // Atualiza título da página
     const titles = { 'conflitos': 'Verificador de Conflitos', 'conferidor_manobras': 'Conferidor de Manobras' };
     document.getElementById('current-page-title').textContent = titles[id] || 'Dashboard';
@@ -94,12 +98,15 @@ function switchConsoleView(context, event = null) {
     document.querySelectorAll('.terminal').forEach(t => t.style.display = 'none');
     document.querySelectorAll('.console-tab').forEach(t => t.classList.remove('active'));
     
-    const term = document.getElementById('term-' + (context === 'regras' ? 'cm' : context));
-    const tab = document.getElementById('tab-' + (context === 'regras' ? 'cm' : context));
+    const term = document.getElementById('term-' + context);
+    const tab = document.getElementById('tab-' + context);
     
     if (term) {
         term.style.display = 'block';
-        term.scrollTop = term.scrollHeight;
+        // Garante que o scroll vá para o final ao exibir, mesmo que o conteúdo não tenha mudado
+        requestAnimationFrame(() => {
+            term.scrollTop = term.scrollHeight;
+        });
     }
     if (tab) tab.classList.add('active');
 }
