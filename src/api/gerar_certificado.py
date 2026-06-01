@@ -38,7 +38,7 @@ def gerar_autoassinado(cert_file, key_file, common_name="GDIS_Plataforma"):
         # Certificado válido por 10 anos
         datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
     ).add_extension(
-        x509.SubjectAlternativeName([x509.DNSName("localhost"), x509.IPAddress(datetime.netaddr.IPAddress("127.0.0.1"))] if False else [x509.DNSName(common_name)]),
+        x509.SubjectAlternativeName([x509.DNSName(common_name)]),
         critical=False,
     ).sign(key, hashes.SHA256())
 

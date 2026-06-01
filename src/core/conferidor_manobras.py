@@ -10,7 +10,6 @@ class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
     BLUE = '\033[94m'
-    CYAN = '\033[96m'
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
@@ -35,7 +34,7 @@ _CACHE_LOCK = threading.Lock()
 URL_LOGIN = "http://gdis-pm/gdispm/"
 
 """
-REGRAS DO CONFERIDOR DE MANOBRAS IMPLEMENTADAS (1 a 42):
+REGRAS DO CONFERIDOR DE MANOBRAS IMPLEMENTADAS (1 a 44):
 01. Equipamento da Solicitação presente na Manobra
 02. Ação Inicial (Abrir/Sinalizar) para equipamentos da Solicitação
 03. Alimentador (Manobra vs Solicitação)
@@ -78,6 +77,8 @@ REGRAS DO CONFERIDOR DE MANOBRAS IMPLEMENTADAS (1 a 42):
 40. Aviso de Risco Sistema (Citação de risco no texto)
 41. Macro MA63 (Troca de Elo) exclusiva para executor Região
 42. Sinalização Pré-Desligamento (MA01 deve ter MA06 até o Desligamento)
+43. Executor em Desligamento/Religamento (Supervisor em D/R)
+44. Sequência de Abertura/Fechamento em Manobra com Pique
 """
 
 def _norm_eqpto(s):
@@ -125,7 +126,7 @@ def _get_eq_id(eq):
     return parts[-1]
 
 def _get_eq_data(dados, eq, alim1, alim2="", local=""):
-    """Busca os dados do equipamento resolvendo conflitos pelo NUMERO-LOCAL ou Alimentador"""
+    """Busca os dados do equipamento resolvendo conflitos pelo NUMERO-LOCAL ou Alimentador/Localidade"""
     
     # Normalização definida localmente para garantir escopo em qualquer contexto de execução
     def _norm(s):
@@ -134,10 +135,11 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
     num_only = _get_eq_id(eq)
     lista = []
     
-    # 1. TENTA POR NUMERO-LOCAL (Mais específico)
+    # 1. TENTA POR NUMERO-LOCAL (Mais específico - chave exata com código de localidade)
     if local:
         local_fixed = str(local).strip()
-        if local_fixed and not local_fixed.startswith('8'): 
+        # Se for código numérico curto (ex: 1113), tenta o padrão '8'
+        if local_fixed.isdigit() and len(local_fixed) <= 5 and not local_fixed.startswith('8'):
             local_fixed = '8' + local_fixed
         
         key_local = f"{num_only}-{local_fixed}"
@@ -158,13 +160,27 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
     # --- DESEMPATE UNIVERSAL ---
     if isinstance(lista, dict): lista = [lista] 
     if len(lista) == 1: 
-        # print(f"      [DEBUG EQ] Único candidato para {eq}: {lista[0].get('alimentador')} | Local: {lista[0].get('numero_local')}")
         return lista[0]
     
+    # Se chegamos aqui, há colisão de nomes. Vamos filtrar.
+    
+    # A. FILTRAR POR LOCALIDADE (String)
+    if local and not str(local).isdigit():
+        local_norm = _norm(local)
+        candidatos_local = []
+        for item in lista:
+            # Tenta bater com localidade ou municipio
+            if local_norm in _norm(item.get('localidade')) or local_norm in _norm(item.get('municipio')):
+                candidatos_local.append(item)
+        
+        if len(candidatos_local) == 1:
+            return candidatos_local[0]
+        elif len(candidatos_local) > 1:
+            lista = candidatos_local # Refina a busca para os que bateram o local
+
+    # B. FILTRAR POR ALIMENTADOR
     a1 = _norm(alim1)
     a2 = _norm(alim2)
-    
-    # print(f"      [DEBUG EQ] Múltiplos candidatos ({len(lista)}) para {eq}. Alvos norm: {a1} / {a2}")
     
     if a1:
         for item in lista:
@@ -178,7 +194,6 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
                 if _norm(alim_orig) == a2: return item
             
     # Último caso: Retorna o primeiro da lista de candidatos detectados
-    # print(f"      [DEBUG EQ] Nenhum alimentador casou. Retornando primeiro da lista: {lista[0].get('alimentador')}")
     return lista[0]
 
 def _obter_parametros_conferidor():
@@ -241,6 +256,8 @@ def _carregar_dados_equipamentos(log_func=print):
         col_fases = next((c for c in df.columns if 'FASES' in str(c).upper() or 'FASE' in str(c).upper()), None)
         cols_alim = [c for c in df.columns if 'ALIMENTADOR' in str(c).upper() or 'REFALM' in str(c).upper()]
         col_num_local = next((c for c in df.columns if 'NUMERO-LOCAL' in str(c).upper()), None)
+        col_localidade = next((c for c in df.columns if 'LOCALIDADE' in str(c).upper() and 'COD' not in str(c).upper()), None)
+        col_municipio = next((c for c in df.columns if 'MUNICIPIO' in str(c).upper() or 'MUNICÍPIO' in str(c).upper()), None)
         
         if not col_eqpto and len(df.columns) > 0:
             col_eqpto = df.columns[0] # Fallback para a primeira coluna
@@ -251,6 +268,8 @@ def _carregar_dados_equipamentos(log_func=print):
             vals_posope = df[col_posope].values if col_posope else [''] * len(df)
             vals_fases = df[col_fases].values if col_fases else [''] * len(df)
             vals_num_local = df[col_num_local].values if col_num_local else [''] * len(df)
+            vals_localidade = df[col_localidade].values if col_localidade else [''] * len(df)
+            vals_municipio = df[col_municipio].values if col_municipio else [''] * len(df)
             
             # Lista de arrays de alimentadores
             vals_alims = [df[c].values for c in cols_alim]
@@ -262,6 +281,8 @@ def _carregar_dados_equipamentos(log_func=print):
                 p_val = vals_posope[row_idx]
                 f_val = vals_fases[row_idx]
                 nl_val = vals_num_local[row_idx]
+                loc_val = vals_localidade[row_idx]
+                mun_val = vals_municipio[row_idx]
                 
                 # Coleta todos os alimentadores das colunas candidatas
                 alim_vals = []
@@ -279,18 +300,15 @@ def _carregar_dados_equipamentos(log_func=print):
                     'telecontrolado': tele,
                     'posope': posope,
                     'fases': fases,
-                    'alimentadores': alim_vals, # Agora é uma lista
-                    'numero_local': num_local
+                    'alimentadores': alim_vals,
+                    'numero_local': num_local,
+                    'localidade': str(loc_val).strip().upper(),
+                    'municipio': str(mun_val).strip().upper()
                 }
                 
                 # Indexa pela chave principal (equipamento)
                 if eq not in dados: dados[eq] = []
                 dados[eq].append(record)
-                
-                # Indexa também pelo NUMERO-LOCAL caso disponível
-                if num_local:
-                    if num_local not in dados: dados[num_local] = []
-                    dados[num_local].append(record)
                 
                 # Indexa também pelo NUMERO-LOCAL caso disponível
                 if num_local:
@@ -318,7 +336,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         log_func(*args, **kwargs)
 
     print("=====================================================")
-    print("      VERIFICADOR DE MANOBRAS (Regras do Conferidor 1 a 43)        ")
+    print("      VERIFICADOR DE MANOBRAS (Regras do Conferidor 1 a 44)        ")
     print("=====================================================")
     
     manobra_num = manobra_param if manobra_param else input("Digite o número da Manobra Base: ").strip()
@@ -1113,7 +1131,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         # 2. Verificação de existência e Quantidade
         num_equipes_header = 0
-        for sigla, desc in siglas_validar.items():
+        for sigla, _ in siglas_validar.items():
             # Procura a sigla no texto
             m_sigla = re.search(r'\b' + sigla + r'\b\s*:\s*(\d+)', texto_primeira)
             if re.search(r'\b' + sigla + r'\b', texto_primeira):
@@ -1506,7 +1524,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             executor = mi.get('executor', '').upper()
             obs = mi.get('observacao', '').upper()
             cron = mi.get('cronologia', 0)
-            is_dr = "DESLIGAMENTO" in etapa_txt or "RELIGAMENTO" in etapa_txt
             
             # --- REGRA 41: MA63 (TROCA DE ELO FUSÍVEL) ---
             if "MA63" in txt:
@@ -1891,12 +1908,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     if not manobra_map:
         print("⚠️  Manobra vazia. Sem equipamentos manobrados.")
         
-    falhas_r22 = {}
     for eq, manobra_items in manobra_map.items():
         print(f"\n🔹 Equipamento: {eq}")
         
         # Obtém prefixo do equipamento para inverter MA77 corretamente (Regra 22)
-        eq_info_rule22 = _get_eq_data(dados_equipamentos, eq, next((mi.get('alim','') for mi in manobra_items), ''))
         prefixo_eq = "01" if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq) else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
         
         # REGRA 2 (Ação Inicial de Abertura) - Apenas para equipamentos da solicitação
@@ -2212,6 +2227,71 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             for f in falhas_r38: print_regra(38, "ERRO", f)
         else:
             print_regra(38, "OK", "Operações em equipamentos manuais executadas corretamente pela Região.")
+
+    # REGRA 44 (Sequência de Abertura/Fechamento em Manobra com Pique)
+    print("\n=== FASE: Sequência Manobra com Pique (Regra 44) ===")
+    falhas_r44 = []
+    
+    macros_abertura_pique = re.compile(r'\b(MA01|MA31|MA30)\b(?!\s*-\s*OUTROS)')
+    macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
+    
+    # Agrupar itens por etapa para analisar a ordem
+    etapas_pique = {} # key: grupo_id, value: list of items
+    
+    for mi in manobra_dados:
+        etapa_nome = mi.get('etapa_nome', '').upper()
+        etapa_header = mi.get('etapa_texto_header', '').upper()
+        # Captura "PIQUE" no nome ou header da etapa
+        if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
+            grupo_id = mi.get('grupo_id', etapa_nome)
+            if grupo_id not in etapas_pique:
+                etapas_pique[grupo_id] = []
+            etapas_pique[grupo_id].append(mi)
+            
+    if not etapas_pique:
+        print_regra(44, "OK", "Nenhuma etapa de Manobra com Pique detectada.")
+    else:
+        for grupo_id, itens_etapa in etapas_pique.items():
+            etapa_nome_real = itens_etapa[0].get('etapa_nome', grupo_id)
+            
+            # Filtrar apenas os equipamentos com as ações específicas
+            itens_com_carga = []
+            for mi in itens_etapa:
+                txt_alvo = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
+                
+                is_abertura = bool(macros_abertura_pique.search(txt_alvo))
+                is_fechamento = bool(macros_fechamento_pique.search(txt_alvo))
+                
+                # Ignorar qualquer ação que não seja as macros especificadas
+                if is_abertura or is_fechamento:
+                    itens_com_carga.append({
+                        'eq': mi.get('equipamento', '') or mi.get('alimentador', ''),
+                        'txt': txt_alvo,
+                        'is_abrir': is_abertura,
+                        'is_fechar': is_fechamento
+                    })
+            
+            if not itens_com_carga:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}' é uma Manobra com Pique, mas não possui nenhuma ação relevante com Carga (MA01, MA02, MA31, MA66, MA30, MA67).")
+            else:
+                # O primeiro item deve ABRIR
+                primeiro = itens_com_carga[0]
+                if not primeiro['is_abrir']:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', o PRIMEIRO equipamento operado com carga ({primeiro['eq']}) deveria ABRIR (MA01/MA31/MA30), mas a ação detectada não foi de abertura.")
+                
+                # O segundo item deve FECHAR
+                if len(itens_com_carga) > 1:
+                    segundo = itens_com_carga[1]
+                    if not segundo['is_fechar']:
+                        falhas_r44.append(f"Na etapa '{etapa_nome_real}', o SEGUNDO equipamento operado com carga ({segundo['eq']}) deveria FECHAR (MA02/MA66/MA67), mas a ação detectada não foi de fechamento.")
+                else:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', foi encontrado apenas UM equipamento operado com carga, sendo necessário pelo menos o segundo para FECHAR.")
+
+    if falhas_r44:
+        for f in falhas_r44: print_regra(44, "ERRO", f)
+    elif etapas_pique:
+        print_regra(44, "OK", "Sequência cronológica (Abrir e Fechar com Carga) respeitada nas etapas de Manobra com Pique.")
+
 
     # REGRA 43 (Executor em Desligamento/Religamento)
     print("\n=== FASE: Desligamento/Religamento (Regra 43) ===")

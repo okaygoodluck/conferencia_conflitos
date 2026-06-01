@@ -22,10 +22,6 @@ def _norm_str(s):
     s = re.sub(r"\s+", " ", str(s)).strip().upper()
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
-def _norm_alim_match(s):
-    """Normaliza o nome do alimentador para comparação (remove espaços e caracteres especiais)"""
-    if not s: return ""
-    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
 
 
 def _re_macro(m):
@@ -915,7 +911,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         # 2. Verificação de existência e Quantidade
         num_equipes_header = 0
-        for sigla, desc in siglas_validar.items():
+        for sigla, _ in siglas_validar.items():
             # Procura a sigla no texto
             m_sigla = re.search(r'\b' + sigla + r'\b\s*:\s*(\d+)', texto_primeira)
             if re.search(r'\b' + sigla + r'\b', texto_primeira):
@@ -1621,12 +1617,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     if not manobra_map:
         print("⚠️  Manobra vazia. Sem equipamentos manobrados.")
         
-    falhas_r22 = {}
     for eq, manobra_items in manobra_map.items():
         print(f"\n🔹 Equipamento: {eq}")
         
         # Obtém prefixo do equipamento para inverter MA77 corretamente (Regra 22)
-        eq_info_rule22 = _get_eq_data(dados_equipamentos, eq, next((mi.get('alim','') for mi in manobra_items), ''))
         prefixo_eq = "01" if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq) else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
         
         # REGRA 2 (Ação Inicial de Abertura) - Apenas para equipamentos da solicitação

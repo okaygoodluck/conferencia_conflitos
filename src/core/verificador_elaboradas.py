@@ -477,8 +477,6 @@ class VerificadorElaboradas:
         except:
             return False
 
-    def selecionar_situacao_elaborada(self):
-        return self.selecionar_situacao("ELABORADA")
 
     def listar_situacoes_disponiveis(self):
         self.ir_para_busca_manobra()
