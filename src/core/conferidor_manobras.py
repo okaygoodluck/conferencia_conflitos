@@ -266,21 +266,14 @@ def _obter_parametros_conferidor():
     }
 
 def _carregar_dados_equipamentos(log_func=print):
-    """Lê o arquivo CSV de equipamentos e retorna um dicionário"""
+    """Lê o arquivo CSV local de equipamentos e retorna um dicionário"""
     import json
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    caminho_csv_local = os.path.join(root_dir, "data", "equipamentos_gemini.csv")
-    caminho_csv_rede = r"I:\IT\ODCO\PROGRAMACAO_MT\1 - Sistemas da programação\Data_Gemini\equipamentos_gemini.csv"
-    
-    # Prioriza o caminho de rede para garantir centralização, fallback para local se rede inacessível
-    if os.path.exists(caminho_csv_rede):
-        caminho_csv = caminho_csv_rede
-    else:
-        caminho_csv = caminho_csv_local
+    caminho_csv = os.path.join(root_dir, "data", "equipamentos_gemini.csv")
     
     dados = {}
     if not os.path.exists(caminho_csv):
-        log_func(f"[AVISO] Arquivo CSV não encontrado (Regras do Conferidor 7, 31 e 32 ignoradas):\n   {caminho_csv}")
+        log_func(f"[AVISO] Arquivo CSV local não encontrado:\n   {caminho_csv}")
         return dados
         
     try:
