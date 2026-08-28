@@ -5,6 +5,13 @@ import time
 import uuid
 import sys
 import io
+
+# Garante flushing imediato de stdout/stderr para streaming de logs sem atraso
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 import traceback
 import importlib
 from datetime import datetime
@@ -158,8 +165,7 @@ def main():
     threading.Thread(target=_async_load_cache, daemon=True).start()
 
     try:
-        # Forçamos 127.0.0.1 para evitar problemas de resolução localhost/IPv6 no Windows
-        httpd = _ThreadedServer(("127.0.0.1", port), Handler)
+        httpd = _ThreadedServer(("0.0.0.0", port), Handler)
         print(f"\n[START] Servidor aberto em http://127.0.0.1:{port}")
         print("[INFO] A porta já está ativa. O Hub Central já deve reconhecer o serviço.")
         httpd.serve_forever()

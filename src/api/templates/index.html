@@ -28,11 +28,29 @@
                     <i data-lucide="shield-check" class="icon"></i>
                     <span>Conferidor Manobras</span>
                 </a>
-                <a class="nav-item" onclick="showSection('config', this)">
-                    <i data-lucide="settings" class="icon"></i>
-                    <span>Configurações</span>
+                <a class="nav-item" id="nav-item-terminal" onclick="showSection('terminal', this)" style="display: none;">
+                    <i data-lucide="terminal" class="icon"></i>
+                    <span>Gerenciador de Terminais</span>
+                </a>
+                <a class="nav-item" id="btn-admin-auth" onclick="toggleAdminAuth()" style="cursor: pointer;">
+                    <i data-lucide="lock" class="icon" id="btn-admin-icon"></i>
+                    <span id="btn-admin-text">Área do Administrador</span>
                 </a>
             </nav>
+
+            <!-- CAMPOS DE CREDENCIAIS GDIS -->
+            <div class="sidebar-credentials" style="margin: 16px 16px; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="key" style="width: 12px; height: 12px; color: var(--primary);"></i> Login GDIS
+                    </span>
+                    <span style="font-size: 9px; color: var(--accent); opacity: 0.85;" title="Credenciais salvas por 10h neste navegador">⏱️ 10h</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <input type="text" class="shared-user" id="conf-user" placeholder="Usuário GDIS (ex: c012345)" style="font-size: 11px; padding: 6px 10px; border-radius: 4px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); color: var(--text-main); width: 100%; outline: none;">
+                    <input type="password" class="shared-pass" id="conf-pass" placeholder="Senha GDIS" style="font-size: 11px; padding: 6px 10px; border-radius: 4px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); color: var(--text-main); width: 100%; outline: none;">
+                </div>
+            </div>
 
             <div class="sidebar-footer">
                 <div class="session-badge">
@@ -50,8 +68,10 @@
         <main class="main-content">
             <header class="top-nav">
                 <div class="page-title" id="current-page-title">Verificador de Conflitos</div>
-                <div style="font-size: 11px; color: var(--text-muted);">
-                    v2.7.9 | <span id="clock"></span>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div style="font-size: 11px; color: var(--text-muted);">
+                        v2.7.9 | <span id="clock"></span>
+                    </div>
                 </div>
             </header>
 
@@ -236,34 +256,101 @@
                     </div>
                 </section>
 
-                <!-- SECTION: CONFIG -->
-                <section id="section-config" class="content-section" style="display:none;">
-                    <div class="card">
-                        <h2 style="margin-bottom: 20px; font-size: 18px;">Credenciais do Sistema GDIS</h2>
-                        <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 24px;">
-                            Configure suas credenciais uma única vez. Elas serão sincronizadas entre todos os módulos.
-                        </p>
-                        <div class="grid">
-                            <div class="field col-6">
-                                <label>Usuário GDIS</label>
-                                <input type="text" class="shared-user" id="conf-user" required
-                                    placeholder="Seu usuário">
+                <!-- SECTION: GERENCIADOR DE TERMINAIS -->
+                <section id="section-terminal" class="content-section" style="display:none;">
+                    <div class="card" style="margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                            <div>
+                                <h2 style="font-size: 18px; display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                                    <i data-lucide="server" style="color: var(--primary);"></i>
+                                    Gerenciador de Processos & Terminais Centralizados
+                                </h2>
+                                <p style="color: var(--text-muted); font-size: 13px;">
+                                    Monitore a saída de terminal e gerencie o ciclo de vida dos microserviços da Plataforma GDIS.
+                                </p>
                             </div>
-                            <div class="field col-6">
-                                <label>Senha GDIS</label>
-                                <input type="password" class="shared-pass" id="conf-pass" required
-                                    placeholder="Sua senha">
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-primary" onclick="termAction('start_all')">
+                                    <i data-lucide="play"></i> Iniciar Todos
+                                </button>
+                                <button type="button" class="btn btn-outline" onclick="termAction('restart_all')">
+                                    <i data-lucide="refresh-cw"></i> Reiniciar Todos
+                                </button>
+                                <button type="button" class="btn btn-outline" style="border-color: rgba(239,68,68,0.4); color: #ef4444;" onclick="termAction('stop_all')">
+                                    <i data-lucide="square"></i> Parar Todos
+                                </button>
                             </div>
                         </div>
-                        <div
-                            style="margin-top: 40px; padding: 20px; background: rgba(59, 130, 246, 0.05); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.2);">
-                            <p style="font-size: 13px; color: var(--primary);">
-                                <b>Dica:</b> O sistema mantém estas informações apenas durante a sessão ativa no
-                                navegador.
-                            </p>
+                    </div>
+
+                    <div class="card" style="padding: 0; overflow: hidden; border: 1px solid var(--border-color, rgba(255,255,255,0.1));">
+                        <div class="term-dashboard-header">
+                            <div class="term-tabs">
+                                <button type="button" class="term-tab-btn active" data-service="all" onclick="selectTerminalTab('all')">
+                                    <i data-lucide="layers"></i> Todos os Logs
+                                </button>
+
+                                <button type="button" class="term-tab-btn" data-service="hub" onclick="selectTerminalTab('hub')">
+                                    <span id="badge-hub" class="dot online"></span>
+                                    Hub Central (8765)
+                                </button>
+
+                                <button type="button" class="term-tab-btn" data-service="conflitos" onclick="selectTerminalTab('conflitos')">
+                                    <span id="badge-conflitos" class="dot offline"></span>
+                                    Conflitos (8766)
+                                </button>
+
+                                <button type="button" class="term-tab-btn" data-service="conferidor_manobras" onclick="selectTerminalTab('conferidor_manobras')">
+                                    <span id="badge-conferidor_manobras" class="dot offline"></span>
+                                    Conferidor (8767)
+                                </button>
+                            </div>
+
+                            <div class="term-actions-bar">
+                                <div id="term-status-info" class="term-status-badge">
+                                    <span class="dot online"></span> <span>ONLINE</span>
+                                </div>
+
+                                <div style="display: flex; align-items: center; gap: 10px; flex-grow: 1; justify-content: flex-end; flex-wrap: wrap;">
+                                    <div style="position: relative; max-width: 260px; width: 100%;">
+                                        <input type="text" id="term-search-filter" placeholder="🔍 Filtrar logs..." onkeyup="filterTerminalLogs()" class="term-search-input">
+                                    </div>
+
+                                    <label class="term-checkbox">
+                                        <input type="checkbox" id="term-autoscroll" checked>
+                                        <span>Autoscroll</span>
+                                    </label>
+
+                                    <button type="button" class="btn-term-action" onclick="termActionForActive('start')" title="Iniciar Serviço">
+                                        <i data-lucide="play"></i>
+                                    </button>
+
+                                    <button type="button" class="btn-term-action" onclick="termActionForActive('restart')" title="Reiniciar Serviço">
+                                        <i data-lucide="refresh-cw"></i>
+                                    </button>
+
+                                    <button type="button" class="btn-term-action danger" onclick="termActionForActive('stop')" title="Parar Serviço">
+                                        <i data-lucide="square"></i>
+                                    </button>
+
+                                    <button type="button" class="btn-term-action" onclick="clearTerminalLogs()" title="Limpar Tela">
+                                        <i data-lucide="trash-2"></i>
+                                    </button>
+
+                                    <button type="button" class="btn-term-action" onclick="downloadTerminalLogs()" title="Baixar Logs (.txt)">
+                                        <i data-lucide="download"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="term-console-view">
+                            <div id="term-full-output" class="terminal-output-box"></div>
                         </div>
                     </div>
                 </section>
+
+
 
             </div>
         </main>
@@ -272,6 +359,10 @@
         <div id="console-drawer" class="console-drawer">
             <div class="console-header">
                 <div class="console-tabs">
+                    <div id="tab-hub" class="console-tab" onclick="switchConsoleView('hub', event)">
+                        <i data-lucide="server"></i>
+                        <span>Hub</span>
+                    </div>
                     <div id="tab-conf" class="console-tab active" onclick="switchConsoleView('conf', event)">
                         <i data-lucide="zap"></i>
                         <span>Conflitos</span>
@@ -281,16 +372,41 @@
                         <span>Conferidor</span>
                     </div>
                 </div>
-                <div class="console-controls" onclick="toggleConsole(null, false, event)">
+                <div class="console-controls" onclick="toggleConsole(null, null, event)">
                     <span style="font-size: 10px; opacity: 0.5; text-transform: uppercase; margin-right: 10px;"
                         class="hide-mobile">Expandir</span>
                     <i data-lucide="chevron-up" id="console-toggle-icon"></i>
                 </div>
             </div>
             <div class="console-body">
+                <div id="term-hub" class="terminal" style="display: none;"></div>
                 <div id="term-conf" class="terminal" style="display: block;"></div>
                 <div id="term-cm" class="terminal" style="display: none;"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL ADMIN LOGIN -->
+    <div id="modal-admin-login" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i data-lucide="shield-alert" style="color: var(--primary);"></i> Autenticação do Administrador</h3>
+                <button class="modal-close" onclick="closeAdminModal()">&times;</button>
+            </div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+                O acesso aos terminais de processos e logs do servidor é restrito. Digite a senha mestre para continuar.
+            </p>
+            <form id="form-admin-login" onsubmit="submitAdminLogin(event)">
+                <div class="field" style="margin-bottom: 16px;">
+                    <label for="admin-password-input">Senha do Administrador</label>
+                    <input type="password" id="admin-password-input" placeholder="Digite a senha..." required style="width: 100%; margin-top: 6px;">
+                </div>
+                <div id="admin-login-error" style="display: none; color: #ef4444; font-size: 12px; margin-bottom: 12px; font-weight: 600;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAdminModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Acessar Painel</button>
+                </div>
+            </form>
         </div>
     </div>
 

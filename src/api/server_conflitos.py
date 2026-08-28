@@ -5,6 +5,13 @@ import time
 import uuid
 import sys
 import io
+
+# Garante flushing imediato de stdout/stderr para streaming de logs sem atraso
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -198,7 +205,7 @@ def main():
     print(f"   SERVIÇO DE VERIFICAÇÃO DE CONFLITOS (Porta {port})")
     print("="*60)
     try:
-        httpd = _ThreadedServer(("127.0.0.1", port), Handler)
+        httpd = _ThreadedServer(("0.0.0.0", port), Handler)
         print(f"\n[START] Servidor aberto em http://127.0.0.1:{port}")
         httpd.serve_forever()
     except Exception as e:

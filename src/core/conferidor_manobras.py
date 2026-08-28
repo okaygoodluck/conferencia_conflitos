@@ -87,6 +87,49 @@ def _norm_eqpto(s):
     s = re.sub(r"\s*-\s*", " - ", s)
     return s
 
+INVALID_EQPTO_TERMS = {
+    "RISCO SISTEMA",
+    "RISCO PARA SISTEMA",
+    "MANOBRA COM RISCO SISTEMA",
+    "MANOBRA COM RISCO",
+    "MANOBRA COM PIQUE",
+    "MANOBRA",
+    "PIQUE",
+    "BLOQUEIO",
+    "SEM INTERRUPCAO",
+    "SEM INTERRUPÇÃO",
+    "NENHUM",
+    "NENHUMA",
+    "CANCELADA",
+    "OBSERVACAO",
+    "OBSERVAÇÃO",
+    "INFORMACAO",
+    "INFORMAÇÃO",
+    "LOCAL",
+    "LOCAIS",
+    "LOCAIS DE INTERRUPÇÃO",
+    "LOCAIS DE INTERRUPCAO",
+    "ALIMENTADOR",
+    "SUBESTACAO",
+    "SUBESTAÇÃO",
+}
+
+
+def _is_eqpto_valido(s):
+    if not s or not isinstance(s, str):
+        return False
+    s_clean = s.strip()
+    s_upper = s_clean.upper()
+    if not s_upper or s_upper in ("-", " - ", "--", "N/A", "NONE", "NULL"):
+        return False
+    if s_upper in INVALID_EQPTO_TERMS:
+        return False
+    if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
+        return False
+    if re.fullmatch(r"\d{1,3}", s_upper):
+        return False
+    return True
+
 def _norm_str(s):
     """Normaliza strings genéricas removendo espaços extras, acentos e capitalizando"""
     if not s: return ""
@@ -866,66 +909,146 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             return { inicio: dIni, termino: dFim };
         }""")
 
-        # Extrai os equipamentos listados em Locais de Interrupção
-        solicitacao_locais = page.evaluate("""() => {
-            const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim();
-            const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-            
-            const tables = Array.from(document.querySelectorAll('table'));
-            const eqptos = [];
-            
-            for (const tabela of tables) {
-                if (!tabela || tabela.innerText.length < 20) continue;
+        # Extrai os equipamentos listados em Locais de Interrupção (com suporte a paginação de até 10 páginas)
+        solicitacao_locais = []
+        for pag in range(1, 11):
+            novos_eqs = page.evaluate("""() => {
+                const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                
+                const tables = Array.from(document.querySelectorAll('table'));
+                const eqptos = [];
+                
+                for (const tabela of tables) {
+                    if (!tabela || tabela.innerText.length < 20) continue;
 
-                const rows = Array.from(tabela.querySelectorAll('tr'));
-                let headerRowIdx = -1;
-                let idxNumero = -1;
-                let idxAlim = -1;
-                let idxLocal = -1;
-                let idxIni = -1;
-                let idxFim = -1;
-                
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (!row) continue;
-                    const cells = Array.from(row.querySelectorAll('th, td'));
-                    const texts = cells.map(c => norm(c.textContent));
+                    const rows = Array.from(tabela.querySelectorAll('tr'));
+                    let headerRowIdx = -1;
+                    let idxNumero = -1;
+                    let idxAlim = -1;
+                    let idxLocal = -1;
+                    let idxIni = -1;
+                    let idxFim = -1;
                     
-                    const tNum = texts.findIndex(t => t.includes('numero') || t.includes('equipamento') || t.includes('trafo'));
-                    if (tNum >= 0 && (texts.some(t => t.includes('alimen')) || texts.some(t => t.includes('local')))) {
-                        headerRowIdx = i;
-                        idxNumero = tNum;
-                        idxAlim = texts.findIndex(t => t.includes('alimen'));
-                        idxLocal = texts.findIndex(t => t.includes('local'));
-                        idxIni = texts.findIndex(t => t.includes('data') && (t.includes('ini')));
-                        idxFim = texts.findIndex(t => t.includes('data') && (t.includes('ter')));
-                        break;
-                    }
-                }
-                
-                if (headerRowIdx >= 0 && idxNumero >= 0) {
-                    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+                    for (let i = 0; i < rows.length; i++) {
                         const row = rows[i];
                         if (!row) continue;
-                        const tds = row.querySelectorAll('td');
-                        if (tds.length > idxNumero) {
-                            const v = clean(tds[idxNumero].textContent || '');
-                            const isCode = v.length > 100 || /function\\s*\\(|var\\s+|const\\s+|document\\.|{|}|;|eval\\(/.test(v);
-                            if (v && /\\d/.test(v) && v.length > 2 && v.length < 100 && !isCode) {
-                                const a = (idxAlim >= 0 && tds.length > idxAlim) ? clean(tds[idxAlim].textContent || '') : '';
-                                const l = (idxLocal >= 0 && tds.length > idxLocal) ? clean(tds[idxLocal].textContent || '') : '';
-                                const ini = (idxIni >= 0 && tds.length > idxIni) ? clean(tds[idxIni].textContent || '') : '';
-                                const fim = (idxFim >= 0 && tds.length > idxFim) ? clean(tds[idxFim].textContent || '') : '';
-                                
-                                eqptos.push({ numero: v, alimentador: a, local: l, inicio: ini, termino: fim });
-                            }
+                        const cells = Array.from(row.querySelectorAll('th, td'));
+                        const texts = cells.map(c => norm(c.textContent));
+                        
+                        const tNum = texts.findIndex(t => t.includes('numero') || t.includes('equipamento') || t.includes('trafo'));
+                        if (tNum >= 0 && (texts.some(t => t.includes('alimen')) || texts.some(t => t.includes('local')))) {
+                            headerRowIdx = i;
+                            idxNumero = tNum;
+                            idxAlim = texts.findIndex(t => t.includes('alimen'));
+                            idxLocal = texts.findIndex(t => t.includes('local'));
+                            idxIni = texts.findIndex(t => t.includes('data') && (t.includes('ini')));
+                            idxFim = texts.findIndex(t => t.includes('data') && (t.includes('ter')));
+                            break;
                         }
                     }
-                    if (eqptos.length > 0) break;
+                    
+                    if (headerRowIdx >= 0 && idxNumero >= 0) {
+                        for (let i = headerRowIdx + 1; i < rows.length; i++) {
+                            const row = rows[i];
+                            if (!row) continue;
+                            const tds = row.querySelectorAll('td');
+                            if (tds.length > idxNumero) {
+                                const v = clean(tds[idxNumero].textContent || '');
+                                const isCode = v.length > 100 || /function\\s*\\(|var\\s+|const\\s+|document\\.|{|}|;|eval\\(/.test(v);
+                                if (v && /\\d/.test(v) && v.length > 2 && v.length < 100 && !isCode) {
+                                    const a = (idxAlim >= 0 && tds.length > idxAlim) ? clean(tds[idxAlim].textContent || '') : '';
+                                    const l = (idxLocal >= 0 && tds.length > idxLocal) ? clean(tds[idxLocal].textContent || '') : '';
+                                    const ini = (idxIni >= 0 && tds.length > idxIni) ? clean(tds[idxIni].textContent || '') : '';
+                                    const fim = (idxFim >= 0 && tds.length > idxFim) ? clean(tds[idxFim].textContent || '') : '';
+                                    
+                                    eqptos.push({ numero: v, alimentador: a, local: l, inicio: ini, termino: fim });
+                                }
+                            }
+                        }
+                        if (eqptos.length > 0) break;
+                    }
                 }
-            }
-            return eqptos;
-        }""")
+                return eqptos;
+            }""")
+
+            if novos_eqs:
+                for ne in novos_eqs:
+                    if _is_eqpto_valido(ne.get('numero')):
+                        if not any(e['numero'] == ne['numero'] and e.get('alimentador') == ne.get('alimentador') and e.get('local') == ne.get('local') for e in solicitacao_locais):
+                            solicitacao_locais.append(ne)
+
+            # Tenta ir para a próxima página no datascroller do RichFaces
+            avancou = page.evaluate("""() => {
+                const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                
+                // 1. Tentar encontrar a seção/painel específica de 'Locais de Interrupção'
+                let container = document;
+                const headers = Array.from(document.querySelectorAll('.rich-stglpanel-header, .rich-panel-header, div, th, td'));
+                const headerLocais = headers.find(h => {
+                    const txt = norm(h.textContent);
+                    return txt.includes('locais de interrupcao');
+                });
+                
+                if (headerLocais) {
+                    const parentPanel = headerLocais.closest('.rich-stglpanel, .rich-panel, form');
+                    if (parentPanel) container = parentPanel;
+                }
+
+                // 2. Coletar todos os botões/células do datascroller
+                const candidates = Array.from(container.querySelectorAll('.rich-datascr-button-next, .rich-datascr-button, [class*="datascr"] td, [class*="datascr-button"], [id*="ds_next"]'));
+                
+                for (const btn of candidates) {
+                    const txt = (btn.textContent || btn.innerText || '').trim();
+                    const cls = (btn.className || '');
+                    
+                    // Se estiver desabilitado (RichFaces usa dsbl, dsbld, inact, etc)
+                    const isDisabled = cls.includes('dsbl') || cls.includes('inact') || btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
+                    if (isDisabled) continue;
+                    
+                    // Checa se é botão de próxima página pela classe ou símbolo (>, », ›, &gt;)
+                    const isNextClass = cls.includes('next');
+                    const isNextSymbol = ['>', '»', '›', '&gt;', '>'].includes(txt) || txt.includes('>') || txt.includes('»');
+                    
+                    if (isNextClass || isNextSymbol) {
+                        btn.click();
+                        return true;
+                    }
+                }
+
+                // Fallback global: se não achou dentro do container, busca no document inteiro
+                if (container !== document) {
+                    const globalCandidates = Array.from(document.querySelectorAll('.rich-datascr-button-next, .rich-datascr-button, [class*="datascr-button"], [id*="ds_next"]'));
+                    for (const btn of globalCandidates) {
+                        const txt = (btn.textContent || btn.innerText || '').trim();
+                        const cls = (btn.className || '');
+                        const isDisabled = cls.includes('dsbl') || cls.includes('inact') || btn.hasAttribute('disabled');
+                        if (isDisabled) continue;
+                        if (cls.includes('next') || ['>', '»', '›'].includes(txt) || txt.includes('>') || txt.includes('»')) {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }""")
+
+            if not avancou:
+                break
+            
+            # Aguarda o modal de carregamento (statusModal) desaparecer
+            page.wait_for_timeout(300)
+            try:
+                page.wait_for_function("""() => {
+                    const modal = document.getElementById('statusModal');
+                    if (!modal) return true;
+                    const s = window.getComputedStyle(modal);
+                    return !s || s.display === 'none';
+                }""", timeout=10000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1000)
 
         # ============================================================
         # DUMP DE DEBUG (O QUE O ROBÔ ENXERGOU)

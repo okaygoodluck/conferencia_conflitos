@@ -167,18 +167,59 @@ def _extract_active_page(html_text):
         return None
 
 
+INVALID_EQPTO_TERMS = {
+    "RISCO SISTEMA",
+    "RISCO PARA SISTEMA",
+    "MANOBRA COM RISCO SISTEMA",
+    "MANOBRA COM RISCO",
+    "MANOBRA COM PIQUE",
+    "MANOBRA",
+    "PIQUE",
+    "BLOQUEIO",
+    "SEM INTERRUPCAO",
+    "SEM INTERRUPÇÃO",
+    "NENHUM",
+    "NENHUMA",
+    "CANCELADA",
+    "OBSERVACAO",
+    "OBSERVAÇÃO",
+    "INFORMACAO",
+    "INFORMAÇÃO",
+    "LOCAL",
+    "LOCAIS",
+    "LOCAIS DE INTERRUPÇÃO",
+    "LOCAIS DE INTERRUPCAO",
+    "ALIMENTADOR",
+    "SUBESTACAO",
+    "SUBESTAÇÃO",
+}
+
+
+def _is_eqpto_valido(s):
+    if not s or not isinstance(s, str):
+        return False
+    s_clean = s.strip()
+    s_upper = s_clean.upper()
+    if not s_upper or s_upper in ("-", " - ", "--", "N/A", "NONE", "NULL"):
+        return False
+    if s_upper in INVALID_EQPTO_TERMS:
+        return False
+    if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
+        return False
+    if re.fullmatch(r"\d{1,3}", s_upper):
+        return False
+    return True
+
+
 def _parse_itens_tables(html_text):
     eqptos = set()
     alim = set()
     # No GDIS, as tabelas podem ter IDs variados dependendo se é Solicitação pura ou via Manobra
     # Exemplos: 'formPesquisa:itensCadastrados', 'j_id338:eqpsList', 'j_id299:documentosList'
-    # DEBUG: Logar todos os IDs de tabela para encontrar o correto se falhar
-    # all_tables = re.findall(r'<table[^>]+id="([^"]+)"', html_text or "", re.I)
-    # if all_tables:
-    #     print(f"[{time.strftime('%H:%M:%S')}] DEBUG GDIS: Tabelas encontradas: {', '.join(all_tables[:10])}")
+    # Nota: 'etapasCadastradas' foi removida para evitar que termos de etapas como 'RISCO SISTEMA' sejam capturados como equipamentos.
 
     for t in re.finditer(
-        r'<table[^>]+id="([^"]*(?::itensCadastrados|:eqpsList|:solicitacaoList|:listaEquipamentos|:idTabelaItens|statusModalContentTable|etapasCadastradas))"[^>]*>([\s\S]*?)</table>',
+        r'<table[^>]+id="([^"]*(?::itensCadastrados|:eqpsList|:solicitacaoList|:listaEquipamentos|:idTabelaItens|:locaisInterrupcao|:locais|statusModalContentTable))"[^>]*>([\s\S]*?)</table>',
         html_text or "",
         flags=re.IGNORECASE,
     ):
@@ -204,10 +245,8 @@ def _parse_itens_tables(html_text):
             tds = re.findall(r"<td[^>]*>([\s\S]*?)</td>", row_html, flags=re.IGNORECASE)
             if idx_eq >= 0 and len(tds) > idx_eq:
                 v = _strip_tags(tds[idx_eq]).strip()
-                if v and v != "-" and v != " - ":
-                    # Falso positivo: colunas como 'Número' ou 'Nº' contendo índices da tabela (10, 20, 30) ou o texto 'Etapa: 10'
-                    if not re.fullmatch(r"\d{1,3}", v) and not v.lower().startswith("etapa"):
-                        eqptos.add(v)
+                if _is_eqpto_valido(v):
+                    eqptos.add(v)
             if idx_al >= 0 and len(tds) > idx_al:
                 v = _strip_tags(tds[idx_al])
                 if v and v != "-" and v != " - ":
@@ -223,32 +262,34 @@ def _parse_eventos(html_text):
     txt = html_text or ""
     # Padrão capturado por tags explícitas
     for m in re.finditer(r"\[EQP:\s*([^\]]+)\]", txt):
-        eq.add(m.group(1).strip())
+        val = m.group(1).strip()
+        if _is_eqpto_valido(val):
+            eq.add(val)
     for m in re.finditer(r"\[ALIM:\s*([^\]]+)\]", txt):
         al.add(m.group(1).strip())
     
     # Fallback para menções diretas em texto (caso não usem as tags [])
-    # Ex: "EQUIPAMENTO: 24-12345" ou "OPERAR EQPTO 24-12345" ou "TRAFO 62326-3-75"
-    # Padrão Transformador: XXXXX-X-XXX (ex: 62326-3-75)
     trafo_regex = r"\d{4,8}\s*-\s*\d+\s*-\s*\d+"
     classico_regex = r"\d{2}\s*-\s*\d{5,8}"
     combined_regex = f"(?:{classico_regex}|{trafo_regex})"
     
     for m in re.finditer(r"(?:EQUIPAMENTO|EQPTO|EQP|CÓDIGO|CODIGO|TRAFO|TRANSFORMADOR)\s*[:\-]?\s*(" + combined_regex + ")", txt, re.IGNORECASE):
-        eq.add(m.group(1).strip())
+        val = m.group(1).strip()
+        if _is_eqpto_valido(val):
+            eq.add(val)
         
     return sorted(eq), sorted(al)
 
 def _super_fallback_equipamentos(html_text):
     """Busca agressiva por padrões de equipamentos no HTML bruto se nada for achado."""
     eqpts = set()
-    # Padrão GDIS clássico: "24-12345" ou "24 - 12345"
-    # Padrão Transformador: "62326 - 3 - 75" ou "254366 - 3 - 150"
     trafo_regex = r"\d{4,8}\s*-\s*\d+\s*-\s*\d+"
     classico_regex = r"\d{2}\s*-\s*\d{5,8}"
     
     for m in re.finditer(r"\b(" + classico_regex + "|" + trafo_regex + r")\b", html_text or ""):
-        eqpts.add(m.group(1).strip())
+        val = m.group(1).strip()
+        if _is_eqpto_valido(val):
+            eqpts.add(val)
     return sorted(eqpts)
 
 
@@ -538,6 +579,45 @@ def coletar_manobras(opener, jsessionid, viewstate, situacao, data_inicio, data_
     return sorted(ids), vs
 
 
+def _extract_scroller_info(html_text):
+    """Identifica o ID do formulário e o ID do datascroller presentes na tabela de detalhe/equipamentos."""
+    if not html_text or "rich-datascr" not in html_text:
+        return None, None
+    
+    m_single = re.search(r"['\"]ajaxSingle['\"]\s*:\s*['\"]([^'\"]+)['\"]", html_text)
+    m_form = re.search(r"<form[^>]+id=[\"']([^\"']+)[\"']", html_text, re.I)
+    
+    form_id = m_form.group(1) if m_form else "formManobra"
+    scroller_id = m_single.group(1) if m_single else None
+    
+    if not scroller_id:
+        m_id = re.search(r'id=["\']([^"\']*(?:scroll|datascr)[^"\']*)["\']', html_text, re.I)
+        if m_id:
+            scroller_id = m_id.group(1)
+            
+    return form_id, scroller_id
+
+
+def _datascroller_detalhe_page(opener, jsessionid, viewstate, scroller_id, form_id, page_value):
+    url = URL_MANOBRA
+    if jsessionid:
+        url = f"{URL_MANOBRA};jsessionid={jsessionid}"
+    payload = {
+        "AJAXREQUEST": "_viewRoot",
+        form_id: form_id,
+        "autoScroll": "",
+        "ajaxSingle": scroller_id,
+        scroller_id: str(page_value),
+        "javax.faces.ViewState": viewstate or "",
+    }
+    try:
+        resp = _post(opener, url, payload)
+        new_vs = _extract_viewstate(resp) or viewstate
+        return resp, new_vs
+    except Exception:
+        return "", viewstate
+
+
 def extrair_uma_manobra(opener, jsessionid, viewstate, numero, malha="", data_inicio="", data_fim=""):
     try:
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
@@ -562,11 +642,36 @@ def extrair_uma_manobra(opener, jsessionid, viewstate, numero, malha="", data_in
     detalhe = _abrir_detalhe(opener, jsessionid, vs, anchor_id, numero)
     eq1, al1 = _parse_itens_tables(detalhe)
     eq2, al2 = _parse_eventos(detalhe)
-    eq = sorted(set(eq1) | set(eq2))
-    al = sorted(set(al1) | set(al2))
+    eq_set = set(eq1) | set(eq2)
+    al_set = set(al1) | set(al2)
 
     eq3 = _super_fallback_equipamentos(detalhe)
-    eq = sorted(set(eq) | set(eq3))
+    eq_set.update(eq3)
+
+    # Paginação adicional de equipamentos/locais de interrupção (limite de 10 páginas)
+    form_id, scroller_id = _extract_scroller_info(detalhe)
+    if scroller_id and form_id:
+        current_vs = vs
+        for page_num in range(2, 11):
+            try:
+                resp_page, current_vs = _datascroller_detalhe_page(opener, jsessionid, current_vs, scroller_id, form_id, page_num)
+                peq, pal = _parse_itens_tables(resp_page)
+                peq_ev, pal_ev = _parse_eventos(resp_page)
+                peq_all = set(peq) | set(peq_ev)
+                pal_all = set(pal) | set(pal_ev)
+                if not peq_all and not pal_all:
+                    break
+                eq_novos = peq_all - eq_set
+                al_novos = pal_all - al_set
+                if not eq_novos and not al_novos:
+                    break
+                eq_set.update(peq_all)
+                al_set.update(pal_all)
+            except Exception:
+                break
+
+    eq = sorted(eq_set)
+    al = sorted(al_set)
 
     d_ini, d_fim = _parse_datas(detalhe)
     return eq, al, vs, d_ini, d_fim

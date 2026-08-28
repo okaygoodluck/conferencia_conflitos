@@ -15,6 +15,49 @@ def _norm_eqpto(s):
     s = re.sub(r"\s*-\s*", " - ", s)
     return s
 
+INVALID_EQPTO_TERMS = {
+    "RISCO SISTEMA",
+    "RISCO PARA SISTEMA",
+    "MANOBRA COM RISCO SISTEMA",
+    "MANOBRA COM RISCO",
+    "MANOBRA COM PIQUE",
+    "MANOBRA",
+    "PIQUE",
+    "BLOQUEIO",
+    "SEM INTERRUPCAO",
+    "SEM INTERRUPÇÃO",
+    "NENHUM",
+    "NENHUMA",
+    "CANCELADA",
+    "OBSERVACAO",
+    "OBSERVAÇÃO",
+    "INFORMACAO",
+    "INFORMAÇÃO",
+    "LOCAL",
+    "LOCAIS",
+    "LOCAIS DE INTERRUPÇÃO",
+    "LOCAIS DE INTERRUPCAO",
+    "ALIMENTADOR",
+    "SUBESTACAO",
+    "SUBESTAÇÃO",
+}
+
+
+def _is_eqpto_valido(s):
+    if not s or not isinstance(s, str):
+        return False
+    s_clean = s.strip()
+    s_upper = s_clean.upper()
+    if not s_upper or s_upper in ("-", " - ", "--", "N/A", "NONE", "NULL"):
+        return False
+    if s_upper in INVALID_EQPTO_TERMS:
+        return False
+    if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
+        return False
+    if re.fullmatch(r"\d{1,3}", s_upper):
+        return False
+    return True
+
 def _norm_str(s):
     """Normaliza strings genéricas removendo espaços extras, acentos e capitalizando"""
     if not s: return ""

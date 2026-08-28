@@ -82,19 +82,64 @@ def _parse_base_manobra():
     return input("Manobra base: ").strip()
 
 
+INVALID_EQPTO_TERMS = {
+    "RISCO SISTEMA",
+    "RISCO PARA SISTEMA",
+    "MANOBRA COM RISCO SISTEMA",
+    "MANOBRA COM RISCO",
+    "MANOBRA COM PIQUE",
+    "MANOBRA",
+    "PIQUE",
+    "BLOQUEIO",
+    "SEM INTERRUPCAO",
+    "SEM INTERRUPÇÃO",
+    "NENHUM",
+    "NENHUMA",
+    "CANCELADA",
+    "OBSERVACAO",
+    "OBSERVAÇÃO",
+    "INFORMACAO",
+    "INFORMAÇÃO",
+    "LOCAL",
+    "LOCAIS",
+    "LOCAIS DE INTERRUPÇÃO",
+    "LOCAIS DE INTERRUPCAO",
+    "ALIMENTADOR",
+    "SUBESTACAO",
+    "SUBESTAÇÃO",
+}
+
+
+def _is_eqpto_valido(s):
+    if not s or not isinstance(s, str):
+        return False
+    s_clean = s.strip()
+    s_upper = s_clean.upper()
+    if not s_upper or s_upper in ("-", " - ", "--", "N/A", "NONE", "NULL"):
+        return False
+    if s_upper in INVALID_EQPTO_TERMS:
+        return False
+    if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
+        return False
+    if re.fullmatch(r"\d{1,3}", s_upper):
+        return False
+    return True
+
+
 def _normalize_sets(eqptos, alims):
     eq_out = set()
     for e in eqptos or []:
         ne = _norm_eqpto(e)
-        if ne and ne != "-" and ne != " - " and not ne.upper().startswith("ETAPA"):
+        if ne and _is_eqpto_valido(ne):
             # Extrai o ID para garantir o cruzamento correto (especialmente para transformadores)
             eid = _get_eq_id(ne)
-            eq_out.add(eid)
+            if _is_eqpto_valido(eid):
+                eq_out.add(eid)
 
     al_out = set()
     for a in alims or []:
         na = _norm_alim(a)
-        if _is_alim_valido(na) and not na.startswith("ETAPA"):
+        if _is_alim_valido(na) and not na.startswith("ETAPA") and _is_eqpto_valido(na):
             al_out.add(na)
 
     return eq_out, al_out
