@@ -978,37 +978,44 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         if not any(e['numero'] == ne['numero'] and e.get('alimentador') == ne.get('alimentador') and e.get('local') == ne.get('local') for e in solicitacao_locais):
                             solicitacao_locais.append(ne)
 
-            # Tenta ir para a próxima página no datascroller do RichFaces
-            avancou = page.evaluate("""() => {
+            # Tenta ir para a próxima página no datascroller do RichFaces (limite estrito de 10 páginas)
+            target_page = pag + 1
+            avancou = page.evaluate("""(targetPage) => {
                 const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/\\s+/g, ' ').trim();
                 
                 // 1. Tentar encontrar a seção/painel específica de 'Locais de Interrupção'
                 let container = document;
                 const headers = Array.from(document.querySelectorAll('.rich-stglpanel-header, .rich-panel-header, div, th, td'));
-                const headerLocais = headers.find(h => {
-                    const txt = norm(h.textContent);
-                    return txt.includes('locais de interrupcao');
-                });
+                const headerLocais = headers.find(h => norm(h.textContent).includes('locais de interrupcao'));
                 
                 if (headerLocais) {
                     const parentPanel = headerLocais.closest('.rich-stglpanel, .rich-panel, form');
                     if (parentPanel) container = parentPanel;
                 }
 
-                // 2. Coletar todos os botões/células do datascroller
-                const candidates = Array.from(container.querySelectorAll('.rich-datascr-button-next, .rich-datascr-button, [class*="datascr"] td, [class*="datascr-button"], [id*="ds_next"]'));
+                // 2. Tenta clicar diretamente na célula com o número da próxima página (ex: "2", "3")
+                const pageCells = Array.from(container.querySelectorAll('.rich-datascr-inact, [class*="datascr"] td'));
+                for (const cell of pageCells) {
+                    const txt = (cell.textContent || cell.innerText || '').trim();
+                    if (txt === String(targetPage)) {
+                        cell.click();
+                        return true;
+                    }
+                }
+
+                // 3. Coletar botões do datascroller para encontrar o botão 'Próxima' (>)
+                const candidates = Array.from(container.querySelectorAll('.rich-datascr-button-next, .rich-datascr-button, [class*="datascr-button"], [id*="ds_next"]'));
                 
                 for (const btn of candidates) {
                     const txt = (btn.textContent || btn.innerText || '').trim();
                     const cls = (btn.className || '');
                     
-                    // Se estiver desabilitado (RichFaces usa dsbl, dsbld, inact, etc)
-                    const isDisabled = cls.includes('dsbl') || cls.includes('inact') || btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
+                    // Somente desabilitado se tiver dsbl/dsbld/disabled (NÃO inact, pois inact indica página clicável!)
+                    const isDisabled = cls.includes('dsbl') || cls.includes('dsbld') || btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true';
                     if (isDisabled) continue;
                     
-                    // Checa se é botão de próxima página pela classe ou símbolo (>, », ›, &gt;)
                     const isNextClass = cls.includes('next');
-                    const isNextSymbol = ['>', '»', '›', '&gt;', '>'].includes(txt) || txt.includes('>') || txt.includes('»');
+                    const isNextSymbol = ['>', '»', '›', '&gt;'].includes(txt) || txt.includes('>') || txt.includes('»');
                     
                     if (isNextClass || isNextSymbol) {
                         btn.click();
@@ -1016,13 +1023,21 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     }
                 }
 
-                // Fallback global: se não achou dentro do container, busca no document inteiro
+                // 4. Fallback global no document inteiro
                 if (container !== document) {
-                    const globalCandidates = Array.from(document.querySelectorAll('.rich-datascr-button-next, .rich-datascr-button, [class*="datascr-button"], [id*="ds_next"]'));
+                    const globalCells = Array.from(document.querySelectorAll('.rich-datascr-inact'));
+                    for (const cell of globalCells) {
+                        if ((cell.textContent || '').trim() === String(targetPage)) {
+                            cell.click();
+                            return true;
+                        }
+                    }
+
+                    const globalCandidates = Array.from(document.querySelectorAll('.rich-datascr-button-next, [class*="datascr-button"], [id*="ds_next"]'));
                     for (const btn of globalCandidates) {
                         const txt = (btn.textContent || btn.innerText || '').trim();
                         const cls = (btn.className || '');
-                        const isDisabled = cls.includes('dsbl') || cls.includes('inact') || btn.hasAttribute('disabled');
+                        const isDisabled = cls.includes('dsbl') || cls.includes('dsbld') || btn.hasAttribute('disabled');
                         if (isDisabled) continue;
                         if (cls.includes('next') || ['>', '»', '›'].includes(txt) || txt.includes('>') || txt.includes('»')) {
                             btn.click();
@@ -1032,23 +1047,23 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 }
 
                 return false;
-            }""")
+            }""", target_page)
 
             if not avancou:
                 break
             
-            # Aguarda o modal de carregamento (statusModal) desaparecer
+            # Aguarda o modal de carregamento (statusModal ou modalPanel) desaparecer completamente
             page.wait_for_timeout(300)
             try:
                 page.wait_for_function("""() => {
-                    const modal = document.getElementById('statusModal');
+                    const modal = document.getElementById('statusModal') || document.getElementById('statusPanel') || document.querySelector('.rich-modalpanel');
                     if (!modal) return true;
                     const s = window.getComputedStyle(modal);
-                    return !s || s.display === 'none';
-                }""", timeout=10000)
+                    return !s || s.display === 'none' || s.visibility === 'hidden';
+                }""", timeout=15000)
             except Exception:
                 pass
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(800)
 
         # ============================================================
         # DUMP DE DEBUG (O QUE O ROBÔ ENXERGOU)

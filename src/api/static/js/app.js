@@ -988,7 +988,10 @@ function renderConferidorResults(log) {
 
     let bannerHtml = '';
     let cmOpMessage = '';
-    if (stats.fail === 0 && stats.warn === 0) {
+
+    const hasErrorInLog = log.toLowerCase().includes('erro') || log.toLowerCase().includes('falha') || log.toLowerCase().includes('exceção');
+
+    if (stats.ok > 0 && stats.fail === 0 && stats.warn === 0) {
         cmOpMessage = `MANOBRA ${manobraCode} FOI CONFERIDA, ESTÁ TUDO OK, MAS NÃO ESQUEÇA DE FAZER SUA VERIFICAÇÃO!`;
         bannerHtml = `
             <div class="alert-banner success-banner" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
@@ -1003,6 +1006,38 @@ function renderConferidorResults(log) {
                 </div>
             </div>
         `;
+    } else if (stats.fail === 0 && stats.warn === 0 && stats.ok === 0) {
+        if (hasErrorInLog) {
+            cmOpMessage = `ERRO NA CONFERÊNCIA DA MANOBRA ${manobraCode}`;
+            bannerHtml = `
+                <div class="alert-banner warning-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
+                    <div style="font-size: 26px;">❌</div>
+                    <div>
+                        <div style="font-size: 15px; font-weight: 700; color: var(--danger);">
+                            ${cmOpMessage}
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                            Ocorreu um erro durante a execução ou extração de dados. Verifique o console de log.
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            cmOpMessage = `PROCESSANDO OU NENHUMA REGRA EXECUTADA PARA A MANOBRA ${manobraCode}`;
+            bannerHtml = `
+                <div class="alert-banner warning-banner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
+                    <div style="font-size: 26px;">ℹ️</div>
+                    <div>
+                        <div style="font-size: 15px; font-weight: 700; color: var(--warn);">
+                            ${cmOpMessage}
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                            Aguarde a conclusão da conferência para visualizar os resultados detalhados.
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
     } else {
         cmOpMessage = `MANOBRA ${manobraCode} FOI CONFERIDA, PORÉM FOI IDENTIFICADO ESSA(S) DIVERGÊNCIA(S):`;
         bannerHtml = `

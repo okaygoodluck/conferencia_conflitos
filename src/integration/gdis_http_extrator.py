@@ -402,6 +402,69 @@ def _parse_datas(html_text):
     return d_ini, d_fim
 
 
+# ---------------------------------------------------------------------------
+# Cache e Gerenciamento de Sessão Persistente GDIS (10 Horas)
+# ---------------------------------------------------------------------------
+_SESSION_CACHE = {
+    "opener": None,
+    "jsessionid": None,
+    "viewstate": None,
+    "timestamp": 0.0,
+    "usuario": None
+}
+SESSION_TTL_SECONDS = 10 * 3600  # 10 horas de persistência
+
+
+def obter_sessao_gdis(usuario: str, senha: str, force_renew: bool = False):
+    """
+    Retorna (opener, jsessionid, viewstate) utilizando a sessão HTTP em cache
+    se tiver menos de 10 horas e for válida. Se expirada ou inválida, renova automaticamente.
+    """
+    global _SESSION_CACHE
+    now = time.time()
+    usr_clean = (usuario or "").strip()
+
+    if not force_renew and _SESSION_CACHE["opener"] and _SESSION_CACHE["jsessionid"] and _SESSION_CACHE["usuario"] == usr_clean:
+        if now - _SESSION_CACHE["timestamp"] < SESSION_TTL_SECONDS:
+            opener = _SESSION_CACHE["opener"]
+            jsessionid = _SESSION_CACHE["jsessionid"]
+            vs = _SESSION_CACHE["viewstate"]
+            try:
+                # Testa rapidamente a validade da sessão
+                _, fresh_vs = _open_manobra_page(opener, jsessionid)
+                _SESSION_CACHE["viewstate"] = fresh_vs
+                return opener, jsessionid, fresh_vs
+            except Exception:
+                # Se a sessão caiu no servidor, força a reconexão
+                pass
+
+    # Novo login e abertura da página de manobras
+    jar = CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    jsessionid, vs = _login(opener, usr_clean, senha)
+    _, vs = _open_manobra_page(opener, jsessionid)
+
+    _SESSION_CACHE["opener"] = opener
+    _SESSION_CACHE["jsessionid"] = jsessionid
+    _SESSION_CACHE["viewstate"] = vs
+    _SESSION_CACHE["timestamp"] = now
+    _SESSION_CACHE["usuario"] = usr_clean
+
+    return opener, jsessionid, vs
+
+
+def invalidar_sessao_gdis():
+    """Invalida o cache local de sessão GDIS."""
+    global _SESSION_CACHE
+    _SESSION_CACHE = {
+        "opener": None,
+        "jsessionid": None,
+        "viewstate": None,
+        "timestamp": 0.0,
+        "usuario": None
+    }
+
+
 def _login(opener, usuario, senha):
     html_login = _get(opener, URL_HOME)
     jsessionid = _extract_jsessionid_from_html(html_login)

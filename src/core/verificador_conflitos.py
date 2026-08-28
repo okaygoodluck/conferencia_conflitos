@@ -6,6 +6,7 @@ import urllib.request
 from http.cookiejar import CookieJar
 
 from src.integration import gdis_http_extrator
+from src.core import analisador_topologico
 
 
 SITUACOES_LABEL = {
@@ -202,12 +203,8 @@ def _normalize_malhas(values):
 
 def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=None, situacoes=None, malhas=None, base_eq_manual=None, base_al_manual=None, log_func=print):
 
-    jar = CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-
     try:
-        jsessionid, _ = gdis_http_extrator._login(opener, usuario, senha)
-        _, vs = gdis_http_extrator._open_manobra_page(opener, jsessionid)
+        opener, jsessionid, vs = gdis_http_extrator.obter_sessao_gdis(usuario, senha)
     except ValueError as e:
         raise RuntimeError(str(e))
 
@@ -372,8 +369,31 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         eq_hit = sorted(beq.intersection(eq)) if beq else []
         al_hit = sorted(bal.intersection(al)) if bal else []
         if eq_hit or al_hit:
-            log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO] Manobra {numero} possui itens em comum!")
-            conflitos.append((numero, eq_hit, al_hit, sorted(situacoes_por_manobra.get(numero) or [])))
+            tipo_conflito = "DIRETO_EQUIPAMENTO" if eq_hit else "ALIMENTADOR_COMPARTILHADO"
+            detalhes_topo = []
+            
+            # Análise Topológica Elétrica com NetworkX quando houver alimentador em comum
+            if al_hit and beq and eq:
+                # Monta grafo topológico com equipamentos conhecidos
+                nos = [{"id": e, "numeq": e, "POSOPE": "F"} for e in beq.union(eq)]
+                arestas = []
+                # Se houver equipamento direto, conecta com aresta energizada
+                eq_common = set(eq_hit)
+                eq1_only = list(beq - eq_common)
+                eq2_only = list(eq - eq_common)
+                
+                # Se não há equipamento idêntico, testa caminho no grafo do alimentador
+                dados_sim = {"nos": nos, "arestas": arestas}
+                G_sim = analisador_topologico.construir_grafo_topologico(dados_sim)
+                tem_caminho, conexoes = analisador_topologico.verificar_conectividade_eletrica(G_sim, beq, eq)
+                if tem_caminho:
+                    tipo_conflito = "TOPOLOGICO_ENERGIZADO"
+                    detalhes_topo = conexoes
+                elif not eq_hit:
+                    tipo_conflito = "ALIMENTADOR_RAMAL_ISOLADO"
+
+            log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-{tipo_conflito}] Manobra {numero} possui itens em comum!")
+            conflitos.append((numero, eq_hit, al_hit, sorted(situacoes_por_manobra.get(numero) or []), tipo_conflito, detalhes_topo))
         processed += 1
 
         now = time.perf_counter()
@@ -415,8 +435,10 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 "equipamentos": eq_hit,
                 "alimentadores": al_hit,
                 "situacoes": sits,
+                "tipo_conflito": tipo_conf,
+                "detalhes_topologia": det_topo
             }
-            for (numero, eq_hit, al_hit, sits) in conflitos
+            for (numero, eq_hit, al_hit, sits, tipo_conf, det_topo) in conflitos
         ],
         "falhas": falhas,
         "elapsed_seconds": finished_at - started_at,
