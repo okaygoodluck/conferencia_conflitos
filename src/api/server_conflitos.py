@@ -5,6 +5,7 @@ import time
 import uuid
 import sys
 import io
+from datetime import datetime
 
 # Garante flushing imediato de stdout/stderr para streaming de logs sem atraso
 if hasattr(sys.stdout, "reconfigure"):
@@ -27,6 +28,23 @@ from src.core import verificador_conflitos
 # --- ESTADO ---
 STATE_LOCK = threading.Lock()
 STATE = {} # job_id -> data
+
+# Tempo de retenção de jobs concluídos em memória (30 minutos)
+JOB_TTL_SECONDS = 30 * 60
+
+def _cleanup_expired_jobs():
+    """Remove jobs expirados do STATE para evitar vazamento de memória."""
+    now = datetime.now()
+    with STATE_LOCK:
+        expired = [
+            jid for jid, st in STATE.items()
+            if st.get("state") in ("done", "error")
+            and "finished_at" in st
+            and (now - st["finished_at"]).total_seconds() > JOB_TTL_SECONDS
+        ]
+        for jid in expired:
+            STATE.pop(jid, None)
+
 
 def _fmt_seconds(seconds):
     try: s = int(round(float(seconds)))
@@ -76,15 +94,16 @@ def _run_conflitos(job_id, base, di, df, user, passwd, situacoes, malhas, eq_man
     try:
         r = verificador_conflitos.run_verificacao(base, di, df, user, passwd, progress_cb=cb, situacoes=situacoes, malhas=malhas, base_eq_manual=eq_manual, base_al_manual=al_manual, log_func=thread_log)
         with STATE_LOCK:
-            STATE[job_id].update({"state": "done", "result": {**r, "elapsed": _fmt_seconds(time.perf_counter() - started_at)}})
+            STATE[job_id].update({"state": "done", "finished_at": datetime.now(), "result": {**r, "elapsed": _fmt_seconds(time.perf_counter() - started_at)}})
         _log(f"Concluído com sucesso: {job_id}", log_func=thread_log)
     except Exception as e:
         with STATE_LOCK:
             if job_id in STATE:
-                STATE[job_id].update({"state": "error", "error": str(e)})
+                STATE[job_id].update({"state": "error", "error": str(e), "finished_at": datetime.now()})
         _log(f"ERRO: {e}", log_func=thread_log)
-    finally:
-        pass
+
+    # Agendamento de limpeza após conclusão
+    threading.Timer(JOB_TTL_SECONDS, _cleanup_expired_jobs).start()
 
 class _ThreadedServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
@@ -166,15 +185,28 @@ class Handler(BaseHTTPRequestHandler):
                         return
 
             if u.path == "/start":
-                job_id = str(uuid.uuid4())
-                with STATE_LOCK: STATE[job_id] = {"state": "igniting"}
-                
-                sit = [s.strip() for s in (body.get("situacoes") or "").split(",") if s.strip()]
-                mal = [m.strip() for m in (body.get("malhas") or "").split(",") if m.strip()]
+                # A-02: Validação de entrada obrigatória
+                manobra = (body.get("manobra") or "").strip()
                 eq_man = [x.strip() for x in (body.get("equipamentos") or "").split(",") if x.strip()]
                 al_man = [x.strip() for x in (body.get("alimentadores") or "").split(",") if x.strip()]
-                
-                threading.Thread(target=_run_conflitos, args=(job_id, body.get("manobra"), body.get("di"), body.get("df"), body.get("user"), body.get("pass"), sit, mal, eq_man, al_man), daemon=True).start()
+                usuario = (body.get("user") or "").strip()
+                senha = (body.get("pass") or "").strip()
+
+                if not manobra and not eq_man and not al_man:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Informe uma manobra base ou equipamentos/alimentadores."})
+                    return
+                if not usuario or not senha:
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Credenciais de usuário são obrigatórias."})
+                    return
+
+                sit = [s.strip() for s in (body.get("situacoes") or "").split(",") if s.strip()]
+                mal = [m.strip() for m in (body.get("malhas") or "").split(",") if m.strip()]
+
+                job_id = str(uuid.uuid4())
+                with STATE_LOCK:
+                    STATE[job_id] = {"state": "igniting"}
+
+                threading.Thread(target=_run_conflitos, args=(job_id, manobra, body.get("di"), body.get("df"), usuario, senha, sit, mal, eq_man, al_man), daemon=True).start()
                 return self._send_json(HTTPStatus.OK, {"job_id": job_id})
 
             if u.path == "/stop":

@@ -2,6 +2,7 @@ import os
 import re
 import getpass
 import threading
+import unicodedata
 from playwright.sync_api import sync_playwright
 
 # Trava global para evitar que múltiplas threads escrevam no arquivo de cache simultaneamente
@@ -14,6 +15,27 @@ def _norm_eqpto(s):
     s = re.sub(r"\s+", " ", (s or "")).strip()
     s = re.sub(r"\s*-\s*", " - ", s)
     return s
+
+def _compare_local(sol_local, manobra_local):
+    """
+    Compara o local/código do local entre Solicitação e Manobra.
+    Retorna True se os códigos numéricos forem idênticos, se forem substrings ou se houver equivalência direta.
+    Ignora valores nulos ou '-'.
+    """
+    if not sol_local or sol_local == '-' or not manobra_local or manobra_local == '-':
+        return False
+    s_clean = str(sol_local).strip()
+    m_clean = str(manobra_local).strip()
+    if s_clean == m_clean:
+        return True
+    if s_clean in m_clean or m_clean in s_clean:
+        return True
+    s_digits = re.findall(r'\b\d{3,6}\b', s_clean)
+    m_digits = re.findall(r'\b\d{3,6}\b', m_clean)
+    if s_digits and m_digits:
+        return any(d in m_digits for d in s_digits)
+    return False
+
 
 INVALID_EQPTO_TERMS = {
     "RISCO SISTEMA",
@@ -61,7 +83,6 @@ def _is_eqpto_valido(s):
 def _norm_str(s):
     """Normaliza strings genéricas removendo espaços extras, acentos e capitalizando"""
     if not s: return ""
-    import unicodedata
     s = re.sub(r"\s+", " ", str(s)).strip().upper()
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
@@ -207,6 +228,7 @@ def _carregar_dados_equipamentos():
         col_fases = next((c for c in df.columns if 'FASES' in str(c).upper() or 'FASE' in str(c).upper()), None)
         cols_alim = [c for c in df.columns if 'ALIMENTADOR' in str(c).upper() or 'REFALM' in str(c).upper()]
         col_num_local = next((c for c in df.columns if 'NUMERO-LOCAL' in str(c).upper()), None)
+        col_prefixo = next((c for c in df.columns if 'PREFIXO' in str(c).upper() or 'TIPO' in str(c).upper() or 'FAMILIA' in str(c).upper() or 'FAMÍLIA' in str(c).upper()), None)
         
         if not col_eqpto and len(df.columns) > 0:
             col_eqpto = df.columns[0] # Fallback para a primeira coluna
@@ -217,6 +239,7 @@ def _carregar_dados_equipamentos():
             vals_posope = df[col_posope].values if col_posope else [''] * len(df)
             vals_fases = df[col_fases].values if col_fases else [''] * len(df)
             vals_num_local = df[col_num_local].values if col_num_local else [''] * len(df)
+            vals_prefixo = df[col_prefixo].values if col_prefixo else [''] * len(df)
             
             # Lista de arrays de alimentadores
             vals_alims = [df[c].values for c in cols_alim]
@@ -228,6 +251,12 @@ def _carregar_dados_equipamentos():
                 p_val = vals_posope[row_idx]
                 f_val = vals_fases[row_idx]
                 nl_val = vals_num_local[row_idx]
+                
+                pref_val = str(vals_prefixo[row_idx]).strip() if col_prefixo else ""
+                if not pref_val and '-' in str(eq_val):
+                    p_part = str(eq_val).split('-')[0].strip()
+                    if p_part.isdigit():
+                        pref_val = p_part.zfill(2)
                 
                 # Coleta todos os alimentadores das colunas candidatas
                 alim_vals = []
@@ -246,7 +275,8 @@ def _carregar_dados_equipamentos():
                     'posope': posope,
                     'fases': fases,
                     'alimentadores': alim_vals, # Agora é uma lista
-                    'numero_local': num_local
+                    'numero_local': num_local,
+                    'prefixo': pref_val
                 }
                 
                 # Indexa pela chave principal (equipamento)
@@ -257,16 +287,41 @@ def _carregar_dados_equipamentos():
                 if num_local:
                     if num_local not in dados: dados[num_local] = []
                     dados[num_local].append(record)
-                
-                # Indexa também pelo NUMERO-LOCAL caso disponível
-                if num_local:
-                    if num_local not in dados: dados[num_local] = []
-                    dados[num_local].append(record)
                     
     except Exception as e:
         print(f"[AVISO] Erro ao carregar dados do CSV: {e}")
         
     return dados
+
+
+def _obter_prefixo_equipamento(eq, eq_data=None):
+    """
+    Retorna o prefixo/família do equipamento (ex: '01' para Trafo, '22' para Religador, '28' para Seccionadora).
+    Dá prioridade aos dados do cadastro/topologia (eq_data) e usa fallback pelo formato da string.
+    """
+    if eq_data:
+        p_data = eq_data.get('prefixo') or eq_data.get('tipo') or eq_data.get('familia')
+        if p_data:
+            p_str = str(p_data).strip()
+            if p_str.isdigit():
+                return p_str.zfill(2)
+            p_upper = p_str.upper()
+            if 'RELIGADOR' in p_upper: return '22'
+            if 'DISJUNTOR' in p_upper: return '21'
+            if 'SECCIONATOR' in p_upper or 'SECCIONALIZADOR' in p_upper: return '23'
+            if 'REGULADOR' in p_upper: return '02'
+            if 'FUSIVEL' in p_upper or 'FUSÍVEL' in p_upper: return '04'
+            if 'SECCIONADORA' in p_upper: return '28'
+            if 'TRANSFORMADOR' in p_upper or 'TRAFO' in p_upper: return '01'
+
+    # Fallback por formato de string (ex: "22 - 12345" ou Regex de Trafo)
+    if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", str(eq)):
+        return "01"
+    if '-' in str(eq):
+        part = str(eq).split('-')[0].strip()
+        if part.isdigit():
+            return part.zfill(2)
+    return ""
 
 
 
@@ -521,7 +576,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 let idxLocal = headers.findIndex(h => h === 'local' || h.includes('local'));
                 
                 let idxExec = headers.findIndex(h => h.includes('executor') || h.includes('órgão') || h.includes('orgao') || h.includes('execu'));
-                let idxPosic = headers.findIndex(h => h.includes('posicionamento') || h.includes('posic'));
+                let idxPosic = headers.findIndex(h => h.includes('posicionamento') || h.includes('posic') || h.includes('pos. manobrar') || h.includes('pos.manobrar') || h.includes('pos. manobra') || h.includes('pos.'));
                 let idxObs = headers.findIndex(h => h.includes('observação') || h.includes('observacao') || h.includes('obs'));
                 let idxData = headers.findIndex(h => h.includes('data') || h.includes('hora'));
                 
@@ -970,13 +1025,20 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         if not falhas_r24 and not alertas_r24:
             print("   ✅ REGRA 24: OK (Siglas e quantidades do cabeçalho validadas corretamente).")
 
-    # REGRA 40 (Aviso de Risco Sistema)
+    # REGRA 40 (Aviso de Risco Sistema - Bidirecional)
+    cabecalho_tem_risco = False
     if manobra_etapas_headers:
-        if "RISCO SISTEMA" in txt_headers.upper() or "RISCO PARA SISTEMA" in txt_headers.upper():
-            if "MANOBRA COM RISCO SISTEMA" in manobra_texto_etapas:
-                print("   ✅ REGRA 40: OK (O cabeçalho indica risco e a etapa 'MANOBRA COM RISCO SISTEMA' foi localizada).")
-            else:
-                print("   ❌ REGRA 40: FALHA (O cabeçalho informa Risco para Sistema, mas nenhuma etapa faz a citação 'MANOBRA COM RISCO SISTEMA').")
+        cabecalho_tem_risco = "RISCO SISTEMA" in txt_headers.upper() or "RISCO PARA SISTEMA" in txt_headers.upper()
+
+    etapas_risco_alvo = ["MANOBRA COM RISCO SISTEMA", "MANOBRA C/ PIQUE RISCO SISTEMA"]
+    etapa_tem_risco = any(et_r in manobra_texto_etapas for et_r in etapas_risco_alvo)
+
+    if cabecalho_tem_risco and etapa_tem_risco:
+        print("   ✅ REGRA 40: OK (O cabeçalho indica Risco para Sistema e a etapa de risco correspondente foi localizada).")
+    elif cabecalho_tem_risco and not etapa_tem_risco:
+        print("   ❌ REGRA 40: FALHA (O cabeçalho informa Risco para Sistema, mas nenhuma etapa faz a citação 'MANOBRA COM RISCO SISTEMA' ou 'MANOBRA C/ PIQUE RISCO SISTEMA').")
+    elif not cabecalho_tem_risco and etapa_tem_risco:
+        print("   ❌ REGRA 40: FALHA (A manobra possui etapa de Risco para Sistema, mas o cabeçalho não informa 'RISCO SISTEMA').")
 
     # REGRA 25 (Horários Repetidos nas Etapas)
     if len(manobra_etapas_headers) >= 3:
@@ -1126,15 +1188,39 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
     # REGRA 27 (Coerência do Executor)
     falhas_r27 = set()
+    is_manobra_terceiros = "TERCEIROS" in (manobra_texto_etapas + " " + str(locals().get('manobra_metadados_globais', ''))).upper()
+
     for mi in manobra_dados:
-        etapa_n = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], mi.get('etapa_nome', '').upper())
-        exec_n = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], mi.get('executor', '').upper())
-        if "DESLIGAMENTO" in etapa_n and "RELIGAMENTO" not in etapa_n and "SUPERVISOR" not in exec_n:
-            falhas_r27.add(f"'{mi.get('etapa_nome')}' exige 'Supervisor' (encontrado: '{mi.get('executor')}')")
-        elif "RELIGAMENTO" in etapa_n and "SUPERVISOR" not in exec_n:
-            falhas_r27.add(f"'{mi.get('etapa_nome')}' exige 'Supervisor' (encontrado: '{mi.get('executor')}')")
-        elif "MANOBRA PELO TECNICO" in etapa_n and "TECNICO" not in exec_n:
-            falhas_r27.add(f"'{mi.get('etapa_nome')}' exige 'Técnico' (encontrado: '{mi.get('executor')}')")
+        # Inspeção completa do nome da etapa e do texto do cabeçalho da etapa
+        etapa_n = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], f"{mi.get('etapa_nome', '')} {mi.get('etapa_texto_header', '')}".upper())
+        exec_n = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], mi.get('executor', '').strip().upper())
+        obs_n = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], f"{mi.get('observacao', '')} {mi.get('texto_linha', '')}".upper())
+        
+        has_para_refletir = "PARA REFLETIR" in obs_n
+        
+        # Executores Estritos Permitidos
+        is_exec_supervisor = (exec_n == "SUPERVISOR")
+        is_exec_cod_valido = (exec_n == "COD") and has_para_refletir
+        is_exec_tecnico = (exec_n == "TECNICO")
+        is_exec_regiao = (exec_n == "REGIAO")
+
+        # Se for manobra de TERCEIROS, Região e Técnico também podem atuar no Desligamento/Religamento
+        exec_valido_dr = is_exec_supervisor or is_exec_cod_valido or (is_manobra_terceiros and (is_exec_regiao or is_exec_tecnico))
+
+        nome_exib = mi.get('etapa_nome') or mi.get('etapa_texto_header') or 'Etapa'
+
+        is_desligamento = "DESLIGAMENTO" in etapa_n and "RELIGAMENTO" not in etapa_n
+        is_religamento = "RELIGAMENTO" in etapa_n
+
+        if (is_desligamento or is_religamento) and not exec_valido_dr:
+            tipo_etapa = "Desligamento" if is_desligamento else "Religamento"
+            if exec_n == "COD" and not has_para_refletir:
+                falhas_r27.add(f"Etapa '{nome_exib}': {tipo_etapa} com executor 'COD' exige a observação '(PARA REFLETIR)'")
+            else:
+                falhas_r27.add(f"Etapa '{nome_exib}': {tipo_etapa} exige 'Supervisor' ou 'COD (PARA REFLETIR)' (encontrado: '{mi.get('executor') or 'Vazio'}')")
+        elif ("MANOBRA PELO TECNICO" in etapa_n or "MANOBRA PELO TÉCNICO" in etapa_n) and not is_exec_tecnico:
+            falhas_r27.add(f"Etapa '{nome_exib}': Exige executor 'Técnico' (encontrado: '{mi.get('executor') or 'Vazio'}')")
+
     if falhas_r27:
         for f in sorted(falhas_r27): print(f"   ⚠️  REGRA 27: ALERTA ({f}).")
     elif manobra_dados:
@@ -1236,13 +1322,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             if not sol_local or sol_local == "-":
                 pass  # IGNORADA silenciosa
             else:
-                local_ok = any(mi['local'] == sol_local for mi in manobra_items)
+                local_ok = any(_compare_local(sol_local, mi['local']) for mi in manobra_items)
                 if local_ok:
                     print("   ✅ REGRA 4: OK (Local bate com a Manobra).")
                 else:
-                    locais_found = set(mi['local'] for mi in manobra_items if mi['local'])
+                    locais_found = set(mi['local'] for mi in manobra_items if mi['local'] and mi['local'] != '-')
                     locais_str = ", ".join(locais_found) if locais_found else "Nenhum"
                     print(f"   ❌ REGRA 4: FALHA (Equipamento '{eq}' com Local divergente. Esperado: {sol_local}, Encontrado: {locais_str}).")
+
 
     print("\n>>> FASE 4: RESTRIÇÕES FÍSICAS E JURISDIÇÃO (ENGENHARIA)")
     if not manobra_map:
@@ -1255,14 +1342,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         alim_manobra = manobra_items[0].get('alim', '')
         local_manobra = manobra_items[0].get('local', '')
         eq_data = _get_eq_data(dados_equipamentos, eq, alim_manobra, sol_alim, local_manobra)
+        is_telecontrolado = eq_data.get('telecontrolado', False)
         
         # REGRA 31: ESTADO DO EQUIPAMENTO
         # Verifica se o equipamento está sendo aberto/fechado em coerência com seu estado atual no Gemini
 
-        # Identifica o prefixo do equipamento para aplicar regras específicas (Ex: 01=Trafo, 22=Religador)
-        # Regex lida com transformadores ID - Fases - kVA
-        is_trafo = bool(re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq))
-        prefixo = "01" if is_trafo else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
+        # Identifica o prefixo do equipamento (priorizando topologia e fallback por string)
+        prefixo = _obter_prefixo_equipamento(eq, eq_data)
+        is_trafo = (prefixo == "01")
         is_alim = bool(re.search(r'[A-Za-z]', eq)) and ('-' not in eq)
 
         # REGRA 6 (Incompatibilidade de Ação pelo Prefixo)
@@ -1286,7 +1373,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         # REGRA 7 (Modo Local para Equipamentos Telecontrolados)
         if eq in sol_dict:
-            is_telecontrolado = eq_data.get('telecontrolado', False)
             if prefixo == "02":
                 print(f"   ✅ REGRA 7: OK (Equipamento '{eq}' é Regulador de Tensão, não exige Modo Local MA64).")
             elif is_telecontrolado:
@@ -1359,7 +1445,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             pass  # IGNORADA silenciosa
 
         # REGRA 9 (Macros de operação de Religador/Disjuntor)
-        macros_relig_disj = ["MA14", "MA15", "MA16", "MA17", "MA19", "MA20", "MAA4", "MAA5"]
+        macros_relig_disj = ["MA14", "MA15", "MA16", "MA17", "MA19", "MAA4", "MAA5"]
         acoes_rd_encontradas = set()
         for mi in manobra_items:
             for m_rd in macros_relig_disj:
@@ -1421,34 +1507,42 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         else:
             pass  # IGNORADA silenciosa
 
-        # REGRA 12 (Posicionamento obrigatório para operação local/Região)
+        # REGRA 12 (Posicionamento / POS. MANOBRAR obrigatório para operação local pela Região)
         macros_operacao = ["MA01", "MA02", "MA31", "MA66", "MA30", "MA67"]
         falhas_12 = set()
         teve_operacao_regiao = False
-        is_telecontrolado = eq_data.get('telecontrolado', False)
         tem_mab9 = any(re.search(r'\b\d*MAB9\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
+        
         for mi in manobra_items:
+            etapa_nome = mi.get('etapa_nome', '').upper()
+            etapa_header = mi.get('etapa_texto_header', '').upper()
+            # Etapas de pique (MANOBRA COM PIQUE / MANOBRA C/ PIQUE RISCO SISTEMA) usam MA27 em vez de POS. MANOBRAR
+            if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
+                continue
+
             execut = mi['executor'].upper()
-            posic = mi['posicionamento'].upper()
-            pos_obrigatorio = (posic == 'SIM')
-            if 'REGIAO' in execut or 'REGIÃO' in execut:
+            posic = mi.get('posicionamento', '').upper()
+            pos_obrigatorio = (posic in ['SIM', 'S', 'TRUE', '1'])
+            
+            # Executor deve ser especificamente Região / Regiao
+            is_execut_regiao = ('REGIAO' in execut or 'REGIÃO' in execut)
+            
+            if is_execut_regiao:
                 for m_op in macros_operacao:
                     if re.search(r'\b\d*' + m_op + r'\b', mi['texto_linha'], re.IGNORECASE):
                         teve_operacao_regiao = True
-                        if is_telecontrolado and prefixo != "02" and not pos_obrigatorio and not tem_mab9:
+                        if prefixo != "02" and not pos_obrigatorio and not tem_mab9:
                             falhas_12.add(m_op.upper())
         if falhas_12:
             str_macros = ", ".join(sorted(falhas_12))
-            print(f"   ❌ REGRA 12: FALHA (Executor 'Região' operando equipamento telecontrolado '{eq}' ({str_macros}) está sem 'Posicionamento').")
+            print(f"   ❌ REGRA 12: FALHA (Equipamento '{eq}' operado pela Região com as macros ({str_macros}) está sem 'POS. MANOBRAR / Posicionamento = SIM').")
         elif teve_operacao_regiao:
             if prefixo == "02":
                  print(f"   ✅ REGRA 12: OK (Equipamento '{eq}' é Regulador de Tensão operado para abrir/fechar; telecontrole limitado aos TAPs).")
-            elif is_telecontrolado and not tem_mab9:
-                print(f"   ✅ REGRA 12: OK (Operação local de equipamento telecontrolado possui Posicionamento = Sim).")
+            elif not tem_mab9:
+                print(f"   ✅ REGRA 12: OK (Operação pela Região possui POS. MANOBRAR / Posicionamento = SIM).")
             elif tem_mab9:
-                print(f"   ✅ REGRA 12: OK (Exceção: Equipamento possui MAB9 justificando ausência de telecontrole).")
-            else:
-                print(f"   ✅ REGRA 12: OK (Equipamento não é telecontrolado, não exige Posicionamento = Sim).")
+                print(f"   ✅ REGRA 12: OK (Exceção: Equipamento possui MAB9 justificando ausência de telecontrole/posicionamento).")
         else:
             pass  # IGNORADA silenciosa
 
@@ -1614,12 +1708,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 is_abertura = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
                 is_fechamento = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
                 
-                is_regiao = ('REGIAO' in execut or 'REGIÃO' in execut)
+                is_regiao = ('REGIAO' in execut or 'REGIÃO' in execut or 'SUPERVISOR' in execut or 'TECNICO' in execut or 'TÉCNICO' in execut or (execut != 'COD' and bool(execut)))
                 
                 if not (is_abertura or is_fechamento):
                     falhas_r39.add(f"Ação não é Abertura/Fechamento (Ação detectada: {txt.strip()[:20]})")
                 if not is_regiao:
-                    falhas_r39.add(f"Executor não é Região (Atual: {execut})")
+                    falhas_r39.add(f"Executor não é de campo/Região (Atual: {execut})")
                     
         if falhas_r39:
             str_falhas = ", ".join(sorted(falhas_r39))
@@ -1653,19 +1747,36 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     if not manobra_map:
         print("⚠️  Manobra vazia. Sem equipamentos manobrados.")
         
+    limite_cronologia_desligamento = -1
+    for mi in manobra_dados:
+        nome_etapa = mi.get('etapa_nome', '').upper()
+        if "DESLIGAMENTO" in nome_etapa and "RELIGAMENTO" not in nome_etapa:
+            limite_cronologia_desligamento = max(limite_cronologia_desligamento, mi.get('cronologia', 0))
+
     for eq, manobra_items in manobra_map.items():
         print(f"\n🔹 Equipamento: {eq}")
         
         # Obtém prefixo do equipamento para inverter MA77 corretamente (Regra 22)
-        prefixo_eq = "01" if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", eq) else (eq.split('-')[0].strip().zfill(2) if '-' in eq else "")
+        alim_m_item = manobra_items[0].get('alim', '') if manobra_items else ''
+        eq_data_loop = _get_eq_data(dados_equipamentos, eq, alim_m_item)
+        prefixo_eq = _obter_prefixo_equipamento(eq, eq_data_loop)
         
-        # REGRA 2 (Ação Inicial de Abertura) - Apenas para equipamentos da solicitação
+        # REGRA 2 (Ação Inicial de Abertura e Sinalização até o Desligamento) - Apenas para equipamentos da solicitação
         if eq in sol_dict:
-            padrao_abrir = re.compile(r'\b(abrir|aberto|sinalizar|sinalizado)\b', re.IGNORECASE)
-            if any(padrao_abrir.search(mi['texto_linha']) for mi in manobra_items):
-                print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Encontrada ação de 'Abrir' ou 'Sinalizar').")
+            itens_ate_deslig = [mi for mi in manobra_items if limite_cronologia_desligamento == -1 or mi.get('cronologia', 0) <= limite_cronologia_desligamento]
+            
+            tem_completa = any(re.search(r'\b\d*(MA31|MA30)\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
+            tem_ma01 = any(re.search(r'\b\d*MA01\b', mi['texto_linha'], re.IGNORECASE) or re.search(r'\bABRIR\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
+            tem_sinalizacao = any(re.search(r'\b\d*MA06\b', mi['texto_linha'], re.IGNORECASE) or re.search(r'\b(sinalizar|sinalizado)\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
+
+            if tem_completa:
+                print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Ação inicial completa de Abertura e Sinalização - MA31/MA30 confirmada até o desligamento).")
+            elif tem_ma01 and tem_sinalizacao:
+                print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Abertura (MA01) e Sinalização (MA06) confirmadas até o desligamento).")
+            elif tem_ma01 and not tem_sinalizacao:
+                print(f"   ⚠️  REGRA 2: ALERTA (Equipamento '{eq}' possui abertura MA01 até o desligamento, mas falta a sinalização MA06 para isolamento do trecho).")
             else:
-                print(f"   ⚠️  REGRA 2: ALERTA (Equipamento '{eq}' está na manobra, mas não detectamos ação de Abrir ou Sinalizar).")
+                print(f"   ⚠️  REGRA 2: ALERTA (Equipamento '{eq}' está na solicitação, mas não detectamos ação de Abertura ou Sinalização até o desligamento).")
 
         # REGRA 22 (Ações Inversas / Esquecidas / Cronologia de Bloqueios)
         rastreamento_inversas = {
@@ -1783,23 +1894,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         for mi in manobra_items:
             txt = mi['texto_linha'].upper()
-            eh = mi.get('etapa_texto_header', '').upper()
-            etapa_nome = eh + " " + mi.get('etapa_nome', '').upper()
-            is_verificacao_cod = bool(re.search(r'\bVERIFICA[CÇ][AÃ]O\s+PELO\s+COD\b', etapa_nome)) or bool(re.search(r'\bVERIFICA[CÇ][AÃ]O\s+PELO\s+COD\b', txt))
-            
-            if is_verificacao_cod:
-                if re.search(r'\b\d*MA39\b', txt):
-                    if "Abertura Simples (MA01/MA02)" in saldos_crono: saldos_crono["Abertura Simples (MA01/MA02)"] += 1
-                    if "Abertura (MA31/MA66)" in saldos_crono: saldos_crono["Abertura (MA31/MA66)"] += 1
-                    if "At/Sinaliz. (MA30/MA67)" in saldos_crono: saldos_crono["At/Sinaliz. (MA30/MA67)"] += 1
-                    if "Disjuntor/Relig. (MA18/MA19)" in saldos_crono: saldos_crono["Disjuntor/Relig. (MA18/MA19)"] += 1
-                    teve_acao_crono = True
-                if re.search(r'\b\d*MA49\b', txt):
-                    if "Abertura Simples (MA01/MA02)" in saldos_crono: saldos_crono["Abertura Simples (MA01/MA02)"] = 0
-                    if "Abertura (MA31/MA66)" in saldos_crono: saldos_crono["Abertura (MA31/MA66)"] = 0
-                    if "At/Sinaliz. (MA30/MA67)" in saldos_crono: saldos_crono["At/Sinaliz. (MA30/MA67)"] = 0
-                    if "Disjuntor/Relig. (MA18/MA19)" in saldos_crono: saldos_crono["Disjuntor/Relig. (MA18/MA19)"] = 0
-                    teve_acao_crono = True
 
             for nome_grupo, (aberturas, fechamentos) in rastreamento_inversas.items():
                 for m_ab in aberturas:
@@ -1813,7 +1907,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         # fechamento sem abertura prévia. Na verdade, operações de chaveamento
                         # devem ser ignoradas da regra de pré-condição estrita da Regra 30.
                         if saldos_crono[nome_grupo] <= 0:
-                            if nome_grupo not in ["Abertura Simples (MA01/MA02)", "Abertura (MA31/MA66)", "At/Sinaliz. (MA30/MA67)", "Disjuntor/Relig. (MA18/MA19)", "Subestação (MA22/MA23)", "Barramento (MA24/MA25)", "Rede BT (MA56/MA57)", "Rede MT (MA54/MA55)"]:
+                            if nome_grupo not in ["Abertura Simples (MA01/MA02)", "Abertura (MA31/MA66)", "At/Sinaliz. (MA30/MA67)", "Disjuntor/Relig. (MA18/MA19)", "Subestação (MA22/MA23)", "Barramento (MA24/MA25)", "Rede BT (MA56/MA57)", "Rede MT (MA54/MA55)", "By-pass (MA09/MA10)"]:
                                 falhas_r30.add(f"'{m_fe}' sem '{'/'.join(aberturas)}' prévio")
                         else:
                             saldos_crono[nome_grupo] -= 1
@@ -1978,6 +2072,135 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             for f in falhas_r38: print(f"   ❌ REGRA 38: FALHA ({f}).")
         else:
             print("   ✅ REGRA 38: OK (Equipamentos manuais operados corretamente pela Região).")
+
+    # REGRA 44 (Sequência de Manobra com Pique e Pique Risco Sistema, CP:xx, MA27 e MA79)
+    print("\n🔹 Verificando Sequência e Regras de Manobra com Pique (Regra 44)...")
+    falhas_r44 = []
+    
+    macros_abertura_pique = re.compile(r'\b(MA01|MA31|MA30)\b(?!\s*-\s*OUTROS)')
+    macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
+    
+    def _is_eq_telecontrolado(eq_nome, info_eq=None):
+        eq_clean = str(eq_nome or '').strip()
+        prefixo = eq_clean.split('-')[0].strip() if '-' in eq_clean else ''
+        if prefixo in ['22', '23']:
+            return True
+        if info_eq and isinstance(info_eq, dict):
+            return bool(info_eq.get('telecontrolado', False))
+        return False
+
+    # Agrupar itens por etapa de Pique
+    etapas_pique = {} # key: grupo_id, value: list of items
+    
+    for mi in manobra_dados:
+        etapa_nome = mi.get('etapa_nome', '').upper()
+        etapa_header = mi.get('etapa_texto_header', '').upper()
+        
+        # Captura etapas de PIQUE (ex: MANOBRA COM PIQUE, MANOBRA C/ PIQUE RISCO SISTEMA, etc)
+        if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
+            grupo_id = mi.get('grupo_id', etapa_nome)
+            if grupo_id not in etapas_pique:
+                etapas_pique[grupo_id] = []
+            etapas_pique[grupo_id].append(mi)
+            
+    if not etapas_pique:
+        print("   ✅ REGRA 44: OK (Nenhuma etapa de Manobra com Pique detectada).")
+    else:
+        for grupo_id, itens_etapa in etapas_pique.items():
+            etapa_nome_real = itens_etapa[0].get('etapa_nome', grupo_id)
+            etapa_header_real = itens_etapa[0].get('etapa_texto_header', '')
+            texto_cabecario = (etapa_header_real + " " + etapa_nome_real).upper()
+            
+            # 1. VALIDAÇÃO DO CABEÇALHO: CP:xx - DADOS / VOZ / SATELITAL
+            match_cp = re.search(r'\bCP\s*:\s*(\d+)\s*(?:-\s*|\s+)(DADOS|VOZ|SATELITAL)\b', texto_cabecario)
+            if not match_cp:
+                match_parcial = re.search(r'\bCP\s*:\s*(\d+)', texto_cabecario)
+                if match_parcial:
+                    cp_val_parcial = int(match_parcial.group(1))
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', o formato do canal no cabeçalho está incorreto (CP:{cp_val_parcial}). Esperado: 'CP:{cp_val_parcial} - DADOS' (se < 500) ou 'CP:{cp_val_parcial} - VOZ/SATELITAL' (se >= 500).")
+                else:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', é obrigatório constar a informação 'CP:xx - DADOS/VOZ/SATELITAL' no cabeçalho.")
+            else:
+                cp_val = int(match_cp.group(1))
+                cp_tipo = match_cp.group(2).upper()
+                
+                if cp_val < 500 and cp_tipo != "DADOS":
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', a quantidade CP:{cp_val} é menor que 500, portanto o canal DEVE ser 'DADOS' (encontrado: '{cp_tipo}').")
+                elif cp_val >= 500 and cp_tipo not in ["VOZ", "SATELITAL"]:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', a quantidade CP:{cp_val} é maior ou igual a 500, portanto o canal DEVE ser 'VOZ' ou 'SATELITAL' (encontrado: '{cp_tipo}').")
+            
+            # 2. VALIDAÇÃO DAS MACROS MA27 e MA79 E DA SEQUÊNCIA DE MANOBRA
+            itens_com_carga = []
+            
+            for mi in itens_etapa:
+                txt_alvo = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
+                eq_nome = mi.get('equipamento', '') or mi.get('alim', '')
+                info_eq = _get_eq_data(dados_equipamentos, eq_nome, mi.get('alim', '')) if 'dados_equipamentos' in locals() else None
+                is_tele = _is_eq_telecontrolado(eq_nome, info_eq)
+                
+                is_abertura = bool(macros_abertura_pique.search(txt_alvo))
+                is_fechamento = bool(macros_fechamento_pique.search(txt_alvo))
+                
+                if is_abertura or is_fechamento:
+                    itens_com_carga.append({
+                        'mi': mi,
+                        'eq': eq_nome,
+                        'txt': txt_alvo,
+                        'is_abrir': is_abertura,
+                        'is_fechar': is_fechamento,
+                        'is_tele': is_tele
+                    })
+            
+            if not itens_com_carga:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}' é uma Manobra com Pique, mas não possui nenhuma ação relevante com carga (MA01, MA02, MA31, MA66, MA30, MA67).")
+            else:
+                primeiro = itens_com_carga[0]
+                if not primeiro['is_abrir']:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', o PRIMEIRO equipamento operado com carga ({primeiro['eq']}) deveria ABRIR (MA01/MA31/MA30), mas a ação detectada não foi de abertura.")
+                
+                if len(itens_com_carga) > 1:
+                    segundo = itens_com_carga[1]
+                    if not segundo['is_fechar']:
+                        falhas_r44.append(f"Na etapa '{etapa_nome_real}', o SEGUNDO equipamento operado com carga ({segundo['eq']}) deveria FECHAR (MA02/MA66/MA67), mas a ação detectada não foi de fechamento.")
+                else:
+                    falhas_r44.append(f"Na etapa '{etapa_nome_real}', foi encontrado apenas UM equipamento operado com carga, sendo necessário pelo menos o segundo para FECHAR.")
+
+            # Coletar todas as macros presentes em toda a etapa por equipamento
+            macros_por_eq = {}
+            for mi in itens_etapa:
+                eq_k = _norm_eqpto(mi.get('equipamento', ''))
+                if eq_k:
+                    if eq_k not in macros_por_eq:
+                        macros_por_eq[eq_k] = []
+                    txt_line = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
+                    macros_por_eq[eq_k].append(txt_line)
+            
+            for item in itens_com_carga:
+                eq_nome = item['eq']
+                eq_k = _norm_eqpto(eq_nome)
+                is_tele = item['is_tele']
+                txt = item['txt']
+                
+                txt_todas_eq = " ".join(macros_por_eq.get(eq_k, [txt]))
+                tem_ma27 = bool(re.search(r'\bMA27\b', txt_todas_eq))
+                tem_ma79 = bool(re.search(r'\bMA79\b', txt_todas_eq)) or ("CONFIRMAR EQUIPAMENTO COMUNICANDO" in txt_todas_eq)
+                
+                if not is_tele:
+                    if any(re.search(r'\b' + m + r'\b', txt) for m in ["MA01", "MA31", "MA02", "MA66"]):
+                        if not tem_ma27:
+                            falhas_r44.append(f"Na etapa '{etapa_nome_real}', o equipamento manual/não-telecontrolado '{eq_nome}' a ser manobrado exige a presença da macro MA27.")
+                else:
+                    if item['is_fechar'] and any(re.search(r'\b' + m + r'\b', txt) for m in ["MA02", "MA66"]):
+                        if not tem_ma27:
+                            falhas_r44.append(f"Na etapa '{etapa_nome_real}', o fechamento do equipamento telecontrolado '{eq_nome}' exige a macro MA27 antecedendo o fechamento.")
+                    
+                    if not tem_ma79:
+                        falhas_r44.append(f"Na etapa '{etapa_nome_real}', o equipamento telecontrolado '{eq_nome}' exige a macro MA79 (CONFIRMAR EQUIPAMENTO COMUNICANDO) antes da execução da manobra.")
+
+    if falhas_r44:
+        for f in set(falhas_r44): print(f"   ❌ REGRA 44: FALHA ({f}).")
+    elif etapas_pique:
+        print("   ✅ REGRA 44: OK (Cabeçalho CP:xx, macros MA27/MA79 e sequência de Manobra com Pique validados com sucesso).")
 
     # ============================================================
     # FIM DA VERIFICAÇÃO

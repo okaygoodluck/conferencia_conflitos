@@ -64,7 +64,8 @@ Este documento lista os textos exatos disparados pelo sistema para cada regra. U
 ### ⏳ Fase 5: Balanço e Cronologia
 | Regra | Tipo | Texto Base da Mensagem |
 | :--- | :--- | :--- |
-| **2** | ⚠️ ALERTA | `Equipamento '[Eq]' está na manobra, mas não detectamos ação de Abrir ou Sinalizar.` |
+| **2** | ⚠️ ALERTA | `Equipamento '[Eq]' possui abertura (MA01) até o desligamento, mas falta a sinalização (MA06) para isolamento do trecho.` |
+| **2** | ⚠️ ALERTA | `Equipamento '[Eq]' está na solicitação, mas não detectamos ação de Abertura ou Sinalização até o desligamento.` |
 | **22** | ❌ FALHA | `Ações precisam de sua inversão, '[Eq]': [Grupo de Ações Ex: Rede BT (MA56/MA57)].` |
 | **22** | ❌ FALHA | `Cronologia MA15/MA17 em '[Eq]': [Divergência antes/depois do Desligamento].` |
 | **30** | ❌ FALHA | `Ordem cronológica invertida no equipamento '[Eq]': '[Macro]' sem '[Ação]' prévio.` |

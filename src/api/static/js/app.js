@@ -664,8 +664,13 @@ async function startConflitos(e) {
     document.getElementById('conf-progress-container').style.display = 'block';
     document.getElementById('conf-progress-bar').style.width = '0%';
     
+    // Limpeza de estado e resultados da conferência anterior
     document.getElementById('term-conf').textContent = "";
     document.getElementById('txt-conf-main').textContent = "Iniciando...";
+    document.getElementById('txt-conf-small').textContent = "";
+    document.getElementById('conf-summary-bar').innerHTML = "";
+    document.getElementById('tbl-conf-body').innerHTML = "";
+    document.getElementById('lnk-conf-export').style.display = 'none';
 
     toggleConsole('conf', true);
 
@@ -763,13 +768,13 @@ function showConfResults(data) {
         if (!hasConflicts) {
             opMessage = `NENHUM CONFLITO IDENTIFICADO PARA MANOBRA ${manobraBase}`;
         } else {
-            opMessage = `IDENTIFICADO CONFLITO IDENTIFICADO PARA MANOBRA ${manobraBase}`;
+            opMessage = `CONFLITO IDENTIFICADO PARA MANOBRA ${manobraBase}`;
         }
     } else {
         if (!hasConflicts) {
             opMessage = `NENHUM CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
         } else {
-            opMessage = `IDENTIFICADO CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
+            opMessage = `CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
         }
     }
 
@@ -843,6 +848,7 @@ async function startConferidorManobras(e) {
     document.getElementById('cm-progress-bar').style.width = '0%';
     
     document.getElementById('cm-report-content').innerHTML = '';
+    document.getElementById('cm-summary-dash').innerHTML = '';
     document.getElementById('term-cm').textContent = "";
     
     toggleConsole('cm', true);
@@ -868,7 +874,7 @@ async function startConferidorManobras(e) {
         document.getElementById('btn-cm-start').disabled = false;
         document.getElementById('btn-cm-start').classList.remove('btn-loading');
         document.getElementById('cm-skeleton').classList.remove('active');
-        renderConferidorResults("❌ ERRO AO INICIAR: " + err.message);
+        renderConferidorResults("❌ ERRO AO INICIAR: " + err.message, true);
     }
 }
 
@@ -896,7 +902,7 @@ async function pollConferidor() {
             document.getElementById('btn-cm-start').disabled = false;
             document.getElementById('btn-cm-start').classList.remove('btn-loading');
             document.getElementById('cm-progress-bar').style.width = '100%';
-            renderConferidorResults(data.log || "");
+            renderConferidorResults(data.log || "", true);
             setTimeout(() => {
                 document.getElementById('cm-progress-container').style.display = 'none';
             }, 500);
@@ -905,14 +911,14 @@ async function pollConferidor() {
             document.getElementById('btn-cm-start').disabled = false;
             document.getElementById('btn-cm-start').classList.remove('btn-loading');
             document.getElementById('cm-skeleton').classList.remove('active');
-            renderConferidorResults((data.log || "") + "\n\n❌ ERRO: " + data.error);
+            renderConferidorResults((data.log || "") + "\n\n❌ ERRO: " + data.error, true);
         }
     } catch (err) {
         clearInterval(cmTimer);
         document.getElementById('btn-cm-start').disabled = false;
         document.getElementById('btn-cm-start').classList.remove('btn-loading');
         document.getElementById('cm-skeleton').classList.remove('active');
-        renderConferidorResults("❌ ERRO NO MONITORAMENTO: " + err.message);
+        renderConferidorResults("❌ ERRO NO MONITORAMENTO: " + err.message, true);
     }
 }
 
@@ -921,8 +927,13 @@ function stripAnsi(text) {
     return text.replace(/[\u001b\x1b]\[[0-9;]*[a-zA-Z]/g, '').trim();
 }
 
-function renderConferidorResults(log) {
-    if (log.length > 50) {
+function renderConferidorResults(log, jobDone = true) {
+    // M-01: Remove o skeleton baseado no estado real do job, não no tamanho do log
+    if (jobDone) {
+        document.getElementById('cm-skeleton').classList.remove('active');
+        document.getElementById('cm-report-content').style.display = 'block';
+    } else if (log.length > 50) {
+        // Fallback: exibe conteúdo parcial se houver dado suficiente
         document.getElementById('cm-skeleton').classList.remove('active');
         document.getElementById('cm-report-content').style.display = 'block';
     }
@@ -957,7 +968,7 @@ function renderConferidorResults(log) {
                 stats.ok++;
             } else if (isFail) {
                 stats.fail++;
-                let text = l.replace(/❌|FALHA|===/g, '').trim();
+                let text = escapeHtml(l.replace(/❌|FALHA|===/g, '').trim());
                 text = text.replace(/(REGRA\s*\d+)/gi, '<b>$1</b>').replace(/:\s*:/g, ':').trim();
                 ruleItems.push(`
                     <div class="rule-item" style="display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
@@ -967,7 +978,7 @@ function renderConferidorResults(log) {
                 `);
             } else if (isWarn) {
                 stats.warn++;
-                let text = l.replace(/⚠️|ALERTA|===/g, '').trim();
+                let text = escapeHtml(l.replace(/⚠️|ALERTA|===/g, '').trim());
                 text = text.replace(/(REGRA\s*\d+)/gi, '<b>$1</b>').replace(/:\s*:/g, ':').trim();
                 ruleItems.push(`
                     <div class="rule-item" style="display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.05);">

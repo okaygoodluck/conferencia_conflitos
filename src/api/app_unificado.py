@@ -292,7 +292,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.end_headers()
             self.wfile.write(data)
-        except:
+        except Exception as e:
+            print(f"[WARN] Falha ao servir arquivo '{path}': {e}")
             self.send_response(HTTPStatus.NOT_FOUND)
             self.end_headers()
 
@@ -306,7 +307,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 req.add_header(h, self.headers[h])
         
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=120) as resp:
                 self.send_response(resp.status)
                 for k, v in resp.getheaders():
                     self.send_header(k, v)
@@ -316,6 +317,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_response(e.code)
             self.end_headers()
             self.wfile.write(e.read())
+        except urllib.error.URLError as e:
+            print(f"[ERRO PROXY] Timeout ou conexão recusada para {target_url}: {e}")
+            self.send_response(504)
+            self.end_headers()
+            self.wfile.write(b"Gateway Timeout: sub-servico nao respondeu.")
         except Exception as e:
             print(f"[ERRO PROXY] Falha ao encaminhar requisição para {target_url}: {e}")
             self.send_response(503)
@@ -414,8 +420,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
             try:
                 data = json.loads(body)
-            except:
+            except Exception as e:
                 data = {}
+                print(f"[WARN] JSON malformado na requisição: {e}")
 
             action = data.get("action")
             service = data.get("service")
@@ -442,8 +449,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
             try:
                 data = json.loads(body)
-            except:
+            except Exception as e:
                 data = {}
+                print(f"[WARN] JSON malformado na requisição: {e}")
 
             service = data.get("service", "all")
             process_manager.clear_logs(service)
@@ -493,8 +501,8 @@ def main():
             print(f"[AVISO] Falha ao abrir via Python ({e}). Tentando comando de sistema...")
             try:
                 os.system(f'start "" "{url}"')
-            except:
-                print("[ERRO] Não foi possível abrir o navegador automaticamente.")
+            except Exception as e:
+                print(f"[WARN] Erro ao abrir navegador: {e}")
                 print(f"       Por favor, acesse manualmente: {url}")
 
     threading.Timer(2.0, _open_browser).start()
