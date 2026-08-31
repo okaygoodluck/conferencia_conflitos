@@ -301,8 +301,19 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         situacoes = ["EB", "EN"]
     
     malhas = _normalize_malhas(malhas)
-    if not malhas:
-        malhas = [""]
+    if not malhas or malhas == [""]:
+        # Tenta extrair malhas automáticas dos alimentadores da base (ex: MAGU113 -> MAGU)
+        auto_malhas = set()
+        for a in bal:
+            import re
+            m = re.match(r"^([A-Za-z]{3,4})", a)
+            if m:
+                auto_malhas.add(m.group(1).upper())
+        if auto_malhas:
+            log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Malhas de busca auto-detectadas a partir dos alimentadores: {', '.join(sorted(auto_malhas))}")
+            malhas = sorted(list(auto_malhas))
+        else:
+            malhas = [""]
 
     ids_por_situacao = {}
     situacoes_por_manobra = {}

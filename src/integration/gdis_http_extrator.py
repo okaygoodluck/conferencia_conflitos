@@ -637,7 +637,8 @@ def coletar_manobras(opener, jsessionid, viewstate, situacao, data_inicio, data_
     try:
         resp, vs = _pesquisar(opener, jsessionid, fresh_vs, situacao, malha=malha, data_inicio=data_inicio, data_fim=data_fim)
     except Exception as e:
-        raise RuntimeError(f"Falha ao pesquisar manobras para situação '{situacao}' e malha '{malha}': {e}")
+        print(f"[WARN] Falha na coleta de manobras para situação '{situacao}' e malha '{malha}': {e}")
+        return [], fresh_vs
 
     ids = set(x[0] for x in _find_manobra_links(resp))
     if not ids:

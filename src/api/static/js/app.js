@@ -696,14 +696,18 @@ async function startConflitos(e) {
     }
 }
 
+let confPollFailures = 0;
 async function pollConf() {
     if (!confJobId) return;
     try {
         const res = await fetch('/conflitos/status?job_id=' + confJobId);
         if (!res.ok) {
+            confPollFailures++;
+            if (confPollFailures < 3) return; // tolera até 2 oscilações de rede temporárias
             const errData = await res.json().catch(() => ({}));
             throw new Error(errData.error || `Erro HTTP ${res.status}`);
         }
+        confPollFailures = 0;
         const data = await res.json();
 
         const term = document.getElementById('term-conf');
