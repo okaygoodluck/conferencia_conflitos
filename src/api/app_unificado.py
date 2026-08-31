@@ -306,27 +306,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if h in self.headers:
                 req.add_header(h, self.headers[h])
         
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                self.send_response(resp.status)
-                for k, v in resp.getheaders():
-                    self.send_header(k, v)
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    self.send_response(resp.status)
+                    for k, v in resp.getheaders():
+                        self.send_header(k, v)
+                    self.end_headers()
+                    self.wfile.write(resp.read())
+                    return
+            except urllib.error.HTTPError as e:
+                self.send_response(e.code)
                 self.end_headers()
-                self.wfile.write(resp.read())
-        except urllib.error.HTTPError as e:
-            self.send_response(e.code)
-            self.end_headers()
-            self.wfile.write(e.read())
-        except urllib.error.URLError as e:
-            print(f"[ERRO PROXY] Timeout ou conexão recusada para {target_url}: {e}")
-            self.send_response(504)
-            self.end_headers()
-            self.wfile.write(b"Gateway Timeout: sub-servico nao respondeu.")
-        except Exception as e:
-            print(f"[ERRO PROXY] Falha ao encaminhar requisição para {target_url}: {e}")
-            self.send_response(503)
-            self.end_headers()
-            self.wfile.write(f"Erro no Proxy: {e}".encode())
+                self.wfile.write(e.read())
+                return
+            except urllib.error.URLError as e:
+                if attempt == 0:
+                    time.sleep(0.5)
+                    continue
+                print(f"[ERRO PROXY] Timeout ou conexão recusada para {target_url}: {e}")
+                self.send_response(504)
+                self.end_headers()
+                self.wfile.write(b"Gateway Timeout: sub-servico nao respondeu.")
+                return
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(0.5)
+                    continue
+                print(f"[ERRO PROXY] Falha ao encaminhar requisição para {target_url}: {e}")
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(f"Erro no Proxy: {e}".encode())
+                return
 
     def do_GET(self):
         u = urlparse(self.path)

@@ -97,7 +97,7 @@ def _is_manobra_page(html_text):
     return ("id=\"formPesquisa\"" in t) and ("Consultar Manobras" in t or "consultaManobras2" in t)
 
 
-def _post(opener, url, data, headers=None):
+def _post(opener, url, data, headers=None, max_retries=3):
     encoded = urllib.parse.urlencode(data, doseq=True).encode("utf-8")
     req = urllib.request.Request(url, data=encoded, method="POST")
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
@@ -108,22 +108,37 @@ def _post(opener, url, data, headers=None):
         for k, v in headers.items():
             req.add_header(k, v)
             
-    try:
-        with opener.open(req, timeout=_http_timeout()) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
-        # Se for erro de DNS (11001) e estivermos usando o hostname, tenta via IP
-        if "11001" in str(e) and "gdis-pm" in url:
-            new_url = url.replace("gdis-pm.cemig.ad.corp", SERVER_IP).replace("gdis-pm", SERVER_IP)
-            req_ip = urllib.request.Request(new_url, data=encoded, method="POST")
-            for k, v in req.headers.items(): req_ip.add_header(k, v)
-            req_ip.add_header("Host", "gdis-pm") # Preserva o Host header para o JBoss
-            with opener.open(req_ip, timeout=_http_timeout()) as resp:
+    for attempt in range(1, max_retries + 1):
+        try:
+            with opener.open(req, timeout=_http_timeout()) as resp:
                 return resp.read().decode("utf-8", errors="replace")
-        raise
+        except urllib.error.HTTPError as e:
+            if e.code in (500, 502, 503, 504) and attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                continue
+            raise
+        except urllib.error.URLError as e:
+            # Se for erro de DNS (11001) e estivermos usando o hostname, tenta via IP
+            if "11001" in str(e) and "gdis-pm" in url:
+                new_url = url.replace("gdis-pm.cemig.ad.corp", SERVER_IP).replace("gdis-pm", SERVER_IP)
+                req_ip = urllib.request.Request(new_url, data=encoded, method="POST")
+                for k, v in req.headers.items(): req_ip.add_header(k, v)
+                req_ip.add_header("Host", "gdis-pm") # Preserva o Host header para o JBoss
+                try:
+                    with opener.open(req_ip, timeout=_http_timeout()) as resp:
+                        return resp.read().decode("utf-8", errors="replace")
+                except Exception:
+                    if attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                continue
+            raise
 
 
-def _get(opener, url, headers=None):
+def _get(opener, url, headers=None, max_retries=3):
     req = urllib.request.Request(url, method="GET")
     req.add_header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
     req.add_header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
@@ -131,18 +146,33 @@ def _get(opener, url, headers=None):
         for k, v in headers.items():
             req.add_header(k, v)
             
-    try:
-        with opener.open(req, timeout=_http_timeout()) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as e:
-        if "11001" in str(e) and "gdis-pm" in url:
-            new_url = url.replace("gdis-pm.cemig.ad.corp", SERVER_IP).replace("gdis-pm", SERVER_IP)
-            req_ip = urllib.request.Request(new_url, method="GET")
-            for k, v in req.headers.items(): req_ip.add_header(k, v)
-            req_ip.add_header("Host", "gdis-pm")
-            with opener.open(req_ip, timeout=_http_timeout()) as resp:
+    for attempt in range(1, max_retries + 1):
+        try:
+            with opener.open(req, timeout=_http_timeout()) as resp:
                 return resp.read().decode("utf-8", errors="replace")
-        raise
+        except urllib.error.HTTPError as e:
+            if e.code in (500, 502, 503, 504) and attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                continue
+            raise
+        except urllib.error.URLError as e:
+            if "11001" in str(e) and "gdis-pm" in url:
+                new_url = url.replace("gdis-pm.cemig.ad.corp", SERVER_IP).replace("gdis-pm", SERVER_IP)
+                req_ip = urllib.request.Request(new_url, method="GET")
+                for k, v in req.headers.items(): req_ip.add_header(k, v)
+                req_ip.add_header("Host", "gdis-pm")
+                try:
+                    with opener.open(req_ip, timeout=_http_timeout()) as resp:
+                        return resp.read().decode("utf-8", errors="replace")
+                except Exception:
+                    if attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    raise
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)
+                continue
+            raise
 
 
 def _find_manobra_links(html_text):
@@ -534,7 +564,7 @@ def _pesquisar(opener, jsessionid, viewstate, situacao, malha=None, numero_manob
         new_vs = _extract_viewstate(resp) or viewstate
         return resp, new_vs
     except urllib.error.HTTPError as e:
-        if e.code != 500:
+        if e.code not in (500, 502, 503, 504):
             raise
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
         payload["javax.faces.ViewState"] = fresh_vs or viewstate or ""
@@ -560,7 +590,7 @@ def _datascroller_page(opener, jsessionid, viewstate, page_value):
         new_vs = _extract_viewstate(resp) or viewstate
         return resp, new_vs
     except urllib.error.HTTPError as e:
-        if e.code != 500:
+        if e.code not in (500, 502, 503, 504):
             raise
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
         payload["javax.faces.ViewState"] = fresh_vs or viewstate or ""
@@ -585,7 +615,7 @@ def _abrir_detalhe(opener, jsessionid, viewstate, anchor_id, id_manobra_param):
         resp = _post(opener, url, payload)
         return resp
     except urllib.error.HTTPError as e:
-        if e.code != 500:
+        if e.code not in (500, 502, 503, 504):
             raise
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
         payload["javax.faces.ViewState"] = fresh_vs or viewstate or ""
@@ -633,7 +663,7 @@ def coletar_manobras(opener, jsessionid, viewstate, situacao, data_inicio, data_
                     break
 
             except urllib.error.HTTPError as e:
-                if e.code != 500: raise
+                if e.code not in (500, 502, 503, 504): raise
                 _, vs = _open_manobra_page(opener, jsessionid)
         
         if not advanced:
