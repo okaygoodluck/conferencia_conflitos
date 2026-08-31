@@ -33,7 +33,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [2/3] Verificando Dependencias...
-python -c "import playwright, pandas, openpyxl" >nul 2>&1
+python -c "import playwright, pandas, openpyxl, networkx" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [INFO] Instalando bibliotecas necessarias...
     python -m pip install -r requirements.txt
