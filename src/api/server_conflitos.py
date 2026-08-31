@@ -36,12 +36,15 @@ def _cleanup_expired_jobs():
     """Remove jobs expirados do STATE para evitar vazamento de memória."""
     now = datetime.now()
     with STATE_LOCK:
-        expired = [
-            jid for jid, st in STATE.items()
-            if st.get("state") in ("done", "error")
-            and "finished_at" in st
-            and (now - st["finished_at"]).total_seconds() > JOB_TTL_SECONDS
-        ]
+        expired = []
+        for jid, st in STATE.items():
+            if st.get("state") in ("done", "error") and "finished_at" in st:
+                fin = st["finished_at"]
+                if isinstance(fin, str):
+                    try: fin = datetime.fromisoformat(fin)
+                    except: fin = None
+                if isinstance(fin, datetime) and (now - fin).total_seconds() > JOB_TTL_SECONDS:
+                    expired.append(jid)
         for jid in expired:
             STATE.pop(jid, None)
 
@@ -110,7 +113,7 @@ class _ThreadedServer(ThreadingMixIn, HTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, code, obj):
-        payload = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")

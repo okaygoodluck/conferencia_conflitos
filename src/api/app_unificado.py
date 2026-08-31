@@ -282,7 +282,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode("utf-8"))
+        self.wfile.write(json.dumps(data, ensure_ascii=False, default=str).encode("utf-8"))
 
     def _send_file(self, path, content_type):
         try:
