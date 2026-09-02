@@ -196,7 +196,6 @@ def _normalize_malhas(values):
         s = (v or "").strip().upper()
         if not s or s in seen:
             continue
-        seen.add(s)
         out.append(s)
     return out
 
@@ -208,57 +207,96 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
     except ValueError as e:
         raise RuntimeError(str(e))
 
-    # Dicionário para armazenar equipamentos de cada base (para conflitos entre elas)
-    bases_data = {}
+    # Extrai lista de manobras base (seja string com vários IDs, lista ou id único)
+    base_manobras_list = []
+    if isinstance(base, list):
+        base_manobras_list = [str(x).strip() for x in base if str(x).strip()]
+    elif base and str(base).strip():
+        found = re.findall(r"\b\d{6,10}\b", str(base))
+        if found:
+            seen = set()
+            for m_id in found:
+                if m_id not in seen:
+                    seen.add(m_id)
+                    base_manobras_list.append(m_id)
+        else:
+            base_manobras_list = [str(base).strip()]
 
-    # Se uma manobra base for fornecida, extraímos seus dados.
-    if base and str(base).strip():
-        # Antes de extrair, fazemos uma limpeza nas datas passadas se forem strings "undefined" ou similares do frontend
+    # Dicionário para armazenar dados de cada base
+    bases_data = {}
+    d_ini_list = []
+    d_fim_list = []
+    beq_total = set()
+    bal_total = set()
+
+    for m_base in base_manobras_list:
+        log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Extraindo manobra base {m_base}...")
         d_ini_search = data_inicio if data_inicio and data_inicio != "undefined" else ""
         d_fim_search = data_fim if data_fim and data_fim != "undefined" else ""
 
-        log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Extraindo manobra base {base}...")
-        base_eq, base_al, vs, b_ini, b_fim = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, base, malha="", data_inicio=d_ini_search, data_fim=d_fim_search)
-        
-        # Fallback de datas: se o usuário não forneceu, usa o que extraiu da base
-        if not data_inicio or data_inicio == "undefined":
-            if b_ini: 
-                # Normaliza para dd/mm/aaaa (remove hora se houver)
-                data_inicio = b_ini.split()[0]
-                log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Data início extraída da base: {data_inicio}")
-            else:
-                log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Não foi possível extrair a data de início da base.")
+        try:
+            b_eq, b_al, vs, b_ini, b_fim = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, m_base, malha="", data_inicio=d_ini_search, data_fim=d_fim_search)
+            beq, bal = _normalize_sets(b_eq, b_al)
+        except Exception as e:
+            log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Erro ao extrair manobra base {m_base}: {e}")
+            beq, bal = set(), set()
+            b_ini, b_fim = "", ""
 
-        if not data_fim or data_fim == "undefined":
-            if b_fim:
-                data_fim = b_fim.split()[0]
-                log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Data fim extraída da base: {data_fim}")
-            else:
-                 log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Não foi possível extrair a data de término da base.")
+        if b_ini:
+            d_ini_list.append(b_ini.split()[0])
+        if b_fim:
+            d_fim_list.append(b_fim.split()[0])
 
-        beq, bal = _normalize_sets(base_eq, base_al)
-        bases_data[f"Manobra {base}"] = {"eq": beq, "al": bal}
-    else:
-        beq, bal = set(), set()
-    
+        bases_data[m_base] = {
+            "eq": beq,
+            "al": bal,
+            "b_ini": b_ini,
+            "b_fim": b_fim
+        }
+        beq_total.update(beq)
+        bal_total.update(bal)
 
     # Se houver itens manuais, adicionamos ao conjunto de busca
     if base_eq_manual:
         manual_eq, _ = _normalize_sets(base_eq_manual, [])
-        beq.update(manual_eq)
+        beq_total.update(manual_eq)
         bases_data["Itens Manuais"] = bases_data.get("Itens Manuais", {"eq": set(), "al": set()})
         bases_data["Itens Manuais"]["eq"].update(manual_eq)
     
     if base_al_manual:
         _, manual_al = _normalize_sets([], base_al_manual)
-        bal.update(manual_al)
+        bal_total.update(manual_al)
         bases_data["Itens Manuais"] = bases_data.get("Itens Manuais", {"eq": set(), "al": set()})
         bases_data["Itens Manuais"]["al"].update(manual_al)
 
+    # Fallback de datas: se o usuário não forneceu, usa o intervalo min/max extraído das manobras base
+    def _parse_d(d_str):
+        parts = d_str.split('/')
+        if len(parts) == 3:
+            return f"{parts[2]}-{parts[1]}-{parts[0]}"
+        return d_str
+
+    if not data_inicio or data_inicio == "undefined":
+        if d_ini_list:
+            sorted_d_ini = sorted(d_ini_list, key=_parse_d)
+            data_inicio = sorted_d_ini[0]
+            log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Data início auto-consolidada: {data_inicio}")
+        else:
+            log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Não foi possível extrair a data de início da base.")
+
+    if not data_fim or data_fim == "undefined":
+        if d_fim_list:
+            sorted_d_fim = sorted(d_fim_list, key=_parse_d)
+            data_fim = sorted_d_fim[-1]
+            log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Data fim auto-consolidada: {data_fim}")
+        else:
+             log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Não foi possível extrair a data de término da base.")
+
     # Log consolidado da Base (Telemetria Técnica)
-    log_func(f"\n[{time.strftime('%H:%M:%S')}] [INFO] >>> CONSOLIDADO DE BUSCA (BASE) <<<")
-    log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] EQUIPAMENTOS NA BASE: {', '.join(sorted(beq)) if beq else 'Nenhum'}")
-    log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] ALIMENTADORES NA BASE: {', '.join(sorted(bal)) if bal else 'Nenhum'}")
+    log_func(f"\n[{time.strftime('%H:%M:%S')}] [INFO] >>> CONSOLIDADO DE BUSCA (BASES) <<<")
+    log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] MANOBRAS BASE PROCESSADAS: {', '.join(base_manobras_list) if base_manobras_list else 'Nenhuma'}")
+    log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] EQUIPAMENTOS NA BASE (TOTAL): {', '.join(sorted(beq_total)) if beq_total else 'Nenhum'}")
+    log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] ALIMENTADORES NA BASE (TOTAL): {', '.join(sorted(bal_total)) if bal_total else 'Nenhum'}")
     log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] PERÍODO PESQUISADO: {data_inicio or 'NÃO DEFINIDO'} até {data_fim or 'NÃO DEFINIDO'}\n")
 
     # VALIDAÇÃO FINAL DE DATAS: Só barramos se após a extração da base ainda estivermos sem datas.
@@ -268,18 +306,21 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             "status": "erro",
             "erro": "Datas de busca não definidas. Certifique-se de preenchê-las ou usar uma manobra base válida.",
             "conflitos": [],
+            "resultado_por_base": {},
+            "conflitos_internos": [],
             "total_unico_sem_base": 0,
             "situacoes_total": {},
             "situacoes_usadas": situacoes,
             "situacoes_label": SITUACOES_LABEL,
-            "base": base or "Manual",
-            "base_equipamentos": sorted(beq),
-            "base_alimentadores": sorted(bal),
+            "base": ", ".join(base_manobras_list) if base_manobras_list else (base or "Manual"),
+            "bases_analisadas": base_manobras_list,
+            "base_equipamentos": sorted(beq_total),
+            "base_alimentadores": sorted(bal_total),
             "data_inicio": data_inicio or "NÃO DEFINIDO",
             "data_fim": data_fim or "NÃO DEFINIDO"
         }
 
-    # Identificar conflitos ENTRE as bases (Manobra vs Sol, Sol vs Sol)
+    # Identificar conflitos ENTRE as manobras base coladas (Conflitos Internos)
     conflitos_internos = []
     base_names = sorted(bases_data.keys())
     for i in range(len(base_names)):
@@ -289,6 +330,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             eq_hit = sorted(bases_data[b1]["eq"].intersection(bases_data[b2]["eq"]))
             al_hit = sorted(bases_data[b1]["al"].intersection(bases_data[b2]["al"]))
             if eq_hit or al_hit:
+                log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-INTERNO] {b1} vs {b2} possuem itens em comum!")
                 conflitos_internos.append({
                     "origem": b1,
                     "destino": b2,
@@ -304,8 +346,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
     if not malhas or malhas == [""]:
         # Tenta extrair malhas automáticas dos alimentadores da base (ex: MAGU113 -> MAGU)
         auto_malhas = set()
-        for a in bal:
-            import re
+        for a in bal_total:
             m = re.match(r"^([A-Za-z]{3,4})", a)
             if m:
                 auto_malhas.add(m.group(1).upper())
@@ -342,9 +383,9 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         ids_por_situacao[sit] = sorted(list(set(ids_por_situacao[sit])))
 
     todos_unico = sorted(set(situacoes_por_manobra.keys()))
-    # Remove a própria manobra base da lista de verificação se ela foi encontrada na busca
-    if base in todos_unico:
-        todos_unico = [x for x in todos_unico if x != base]
+    # Remove as próprias manobras base da lista de verificação se foram encontradas na busca
+    if base_manobras_list:
+        todos_unico = [x for x in todos_unico if x not in base_manobras_list]
 
     conflitos = []
     falhas = []
@@ -361,7 +402,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 "conflitos": len(conflitos),
                 "falhas": len(falhas),
                 "elapsed_seconds": time.perf_counter() - started_at,
-                "eta_seconds": 0 # ETA será recalculado no final do loop
+                "eta_seconds": 0
             })
             
         item_started_at = time.perf_counter()
@@ -377,34 +418,46 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             })
             eq, al = set(), set()
 
-        eq_hit = sorted(beq.intersection(eq)) if beq else []
-        al_hit = sorted(bal.intersection(al)) if bal else []
-        if eq_hit or al_hit:
-            tipo_conflito = "DIRETO_EQUIPAMENTO" if eq_hit else "ALIMENTADOR_COMPARTILHADO"
-            detalhes_topo = []
-            
-            # Análise Topológica Elétrica com NetworkX quando houver alimentador em comum
-            if al_hit and beq and eq:
-                # Monta grafo topológico com equipamentos conhecidos
-                nos = [{"id": e, "numeq": e, "POSOPE": "F"} for e in beq.union(eq)]
-                arestas = []
-                # Se houver equipamento direto, conecta com aresta energizada
-                eq_common = set(eq_hit)
-                eq1_only = list(beq - eq_common)
-                eq2_only = list(eq - eq_common)
-                
-                # Se não há equipamento idêntico, testa caminho no grafo do alimentador
-                dados_sim = {"nos": nos, "arestas": arestas}
-                G_sim = analisador_topologico.construir_grafo_topologico(dados_sim)
-                tem_caminho, conexoes = analisador_topologico.verificar_conectividade_eletrica(G_sim, beq, eq)
-                if tem_caminho:
-                    tipo_conflito = "TOPOLOGICO_ENERGIZADO"
-                    detalhes_topo = conexoes
-                elif not eq_hit:
-                    tipo_conflito = "ALIMENTADOR_RAMAL_ISOLADO"
+        eq_hit_total = sorted(beq_total.intersection(eq)) if beq_total else []
+        al_hit_total = sorted(bal_total.intersection(al)) if bal_total else []
 
-            log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-{tipo_conflito}] Manobra {numero} possui itens em comum!")
-            conflitos.append((numero, eq_hit, al_hit, sorted(situacoes_por_manobra.get(numero) or []), tipo_conflito, detalhes_topo))
+        if eq_hit_total or al_hit_total:
+            # Para cada manobra base, verifica se há intersecção específica
+            for m_base, b_data in bases_data.items():
+                m_beq = b_data["eq"]
+                m_bal = b_data["al"]
+                
+                eq_hit = sorted(m_beq.intersection(eq)) if m_beq else []
+                al_hit = sorted(m_bal.intersection(al)) if m_bal else []
+
+                if eq_hit or al_hit:
+                    tipo_conflito = "DIRETO_EQUIPAMENTO" if eq_hit else "ALIMENTADOR_COMPARTILHADO"
+                    detalhes_topo = []
+                    
+                    # Análise Topológica Elétrica com NetworkX quando houver alimentador em comum
+                    if al_hit and m_beq and eq:
+                        nos = [{"id": e, "numeq": e, "POSOPE": "F"} for e in m_beq.union(eq)]
+                        arestas = []
+                        dados_sim = {"nos": nos, "arestas": arestas}
+                        G_sim = analisador_topologico.construir_grafo_topologico(dados_sim)
+                        tem_caminho, conexoes = analisador_topologico.verificar_conectividade_eletrica(G_sim, m_beq, eq)
+                        if tem_caminho:
+                            tipo_conflito = "TOPOLOGICO_ENERGIZADO"
+                            detalhes_topo = conexoes
+                        elif not eq_hit:
+                            tipo_conflito = "ALIMENTADOR_RAMAL_ISOLADO"
+
+                    log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-{tipo_conflito}] Manobra {numero} conflita com Manobra Base {m_base}!")
+                    conflitos.append({
+                        "base_origem": m_base,
+                        "manobra": numero,
+                        "equipamentos": eq_hit,
+                        "alimentadores": al_hit,
+                        "situacoes": sorted(situacoes_por_manobra.get(numero) or []),
+                        "tipo_conflito": tipo_conflito,
+                        "detalhes_topologia": detalhes_topo
+                    })
+
         processed += 1
 
         now = time.perf_counter()
@@ -427,12 +480,28 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             last_progress_at = now
 
     finished_at = time.perf_counter()
+
+    # Estruturação do resultado individualizado por manobra base
+    resultado_por_base = {}
+    for m_base in base_manobras_list:
+        b_data = bases_data.get(m_base, {})
+        c_list = [c for c in conflitos if c.get("base_origem") == m_base]
+        resultado_por_base[m_base] = {
+            "manobra": m_base,
+            "equipamentos": sorted(b_data.get("eq") or []),
+            "alimentadores": sorted(b_data.get("al") or []),
+            "conflitos": c_list,
+            "total_conflitos": len(c_list)
+        }
+
     return {
-        "base": base,
+        "base": ", ".join(base_manobras_list) if base_manobras_list else (base or "Manual"),
+        "bases_analisadas": base_manobras_list,
         "data_inicio": data_inicio,
         "data_fim": data_fim,
-        "base_equipamentos": sorted(beq),
-        "base_alimentadores": sorted(bal),
+        "base_equipamentos": sorted(beq_total),
+        "base_alimentadores": sorted(bal_total),
+        "resultado_por_base": resultado_por_base,
         "conflitos_internos": conflitos_internos,
         "malhas_usadas": malhas,
         "situacoes_usadas": situacoes,
@@ -440,17 +509,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         "contagem_por_malha": contagem_por_malha,
         "situacoes_label": {k: SITUACOES_LABEL.get(k, k) for k in situacoes},
         "total_unico_sem_base": len(todos_unico),
-        "conflitos": [
-            {
-                "manobra": numero,
-                "equipamentos": eq_hit,
-                "alimentadores": al_hit,
-                "situacoes": sits,
-                "tipo_conflito": tipo_conf,
-                "detalhes_topologia": det_topo
-            }
-            for (numero, eq_hit, al_hit, sits, tipo_conf, det_topo) in conflitos
-        ],
+        "conflitos": conflitos,
         "falhas": falhas,
         "elapsed_seconds": finished_at - started_at,
     }

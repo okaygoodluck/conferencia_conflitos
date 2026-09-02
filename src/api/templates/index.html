@@ -83,8 +83,8 @@
                         <form id="form-conflitos">
                             <div class="grid">
                                 <div class="field col-6">
-                                    <label>Manobra Base</label>
-                                    <input type="text" id="conf-manobra" placeholder="Opcional">
+                                    <label>Manobra(s) Base</label>
+                                    <textarea id="conf-manobra" rows="3" placeholder="Digite ou cole os números das manobras base (separados por vírgula, espaço ou quebra de linha)" style="width: 100%;"></textarea>
                                 </div>
                                 <div class="field col-2">
                                     <label>Início</label>
@@ -197,6 +197,8 @@
                             </div>
                         </div>
 
+                        <div id="conf-accordion-container" style="margin-bottom: 20px;"></div>
+
                         <table id="conf-table-real">
                             <thead>
                                 <tr>
@@ -223,7 +225,7 @@
                                     </label>
                                     <textarea id="cm-manobra" required rows="3"
                                         placeholder="Digite ou cole os números das manobras. Ex: 245588790, 245537587, 245041831"
-                                        style="font-family: inherit; font-size: 13px; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-main); width: 100%; resize: vertical; outline: none;"></textarea>
+                                        style="width: 100%;"></textarea>
                                 </div>
                             </div>
                             <div style="margin-top: 16px;">

@@ -753,44 +753,40 @@ function showConfResults(data) {
     document.getElementById('btn-conf-start').classList.remove('btn-loading');
     document.getElementById('conf-skeleton').classList.remove('active');
     document.getElementById('conf-progress-container').style.display = 'none';
-    document.getElementById('conf-table-real').style.display = 'table';
     
     document.getElementById('pane-conf-status').style.display = 'none';
     document.getElementById('pane-conf-results').style.display = 'block';
 
+    const bases = data.bases_analisadas || [];
     const manobraBase = (data.base || confCurrentManobra || document.getElementById('conf-manobra').value || '').trim();
     const eqManual = (confCurrentEqpt || document.getElementById('conf-eq-manual').value || '').trim();
     const alManual = (confCurrentAlim || document.getElementById('conf-al-manual').value || '').trim();
     const eqAlTarget = [eqManual, alManual].filter(Boolean).join(' / ') || 'SOLICITADOS';
 
-    const totalConflicts = (data.conflitos ? data.conflitos.length : 0) + (data.conflitos_internos ? data.conflitos_internos.length : 0);
+    const conflitosInternos = data.conflitos_internos || [];
+    const conflitosGlobais = data.conflitos || [];
+    const totalConflicts = conflitosGlobais.length + conflitosInternos.length;
     const hasConflicts = totalConflicts > 0;
-    const isManobraSearch = Boolean(manobraBase);
+    const elapsed = data.elapsed_seconds ? (data.elapsed_seconds + 's') : (data.elapsed || '0s');
 
     let opMessage = '';
-    if (isManobraSearch) {
-        if (!hasConflicts) {
-            opMessage = `NENHUM CONFLITO IDENTIFICADO PARA MANOBRA ${manobraBase}`;
-        } else {
-            opMessage = `CONFLITO IDENTIFICADO PARA MANOBRA ${manobraBase}`;
-        }
+    if (bases.length > 1) {
+        opMessage = hasConflicts ? `CONFLITO(S) IDENTIFICADO(S) EM LOTE DE ${bases.length} MANOBRAS BASE` : `NENHUM CONFLITO IDENTIFICADO NO LOTE DE ${bases.length} MANOBRAS BASE`;
+    } else if (bases.length === 1 || manobraBase) {
+        const targetM = bases[0] || manobraBase;
+        opMessage = hasConflicts ? `CONFLITO IDENTIFICADO PARA MANOBRA ${targetM}` : `NENHUM CONFLITO IDENTIFICADO PARA MANOBRA ${targetM}`;
     } else {
-        if (!hasConflicts) {
-            opMessage = `NENHUM CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
-        } else {
-            opMessage = `CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
-        }
+        opMessage = hasConflicts ? `CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}` : `NENHUM CONFLITO IDENTIFICADO PARA EQPT E ALIM ${eqAlTarget}`;
     }
 
     const summaryBar = document.getElementById('conf-summary-bar');
-    const totalManobras = data.total_unico_sem_base || 0;
-    const elapsed = data.elapsed || '0s';
+    const totalManobrasGdis = data.total_unico_sem_base || 0;
 
     const bannerBg = hasConflicts ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)';
     const bannerBorder = hasConflicts ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)';
     const bannerColor = hasConflicts ? 'var(--danger)' : 'var(--accent)';
     const icon = hasConflicts ? '⚠️' : '✅';
-    const subText = `${totalConflicts} conflito(s) em ${totalManobras} manobra(s) analisada(s) (${elapsed}).`;
+    const subText = `${totalConflicts} conflito(s) [${conflitosGlobais.length} GDIS, ${conflitosInternos.length} interno(s)] em ${totalManobrasGdis} manobra(s) pesquisadas (${elapsed}).`;
 
     summaryBar.innerHTML = `
         <div class="alert-banner" style="background: ${bannerBg}; border: 1px solid ${bannerBorder}; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
@@ -806,24 +802,139 @@ function showConfResults(data) {
         </div>
     `;
 
+    // Renderização do container de Accordion e Conflitos Internos
+    const accordionContainer = document.getElementById('conf-accordion-container');
+    accordionContainer.innerHTML = '';
+
+    let accordionHtml = '';
+
+    // Alerta de Conflitos Internos destacados no topo
+    if (conflitosInternos.length > 0) {
+        accordionHtml += `
+            <div class="alert-banner warning-banner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 12px; font-weight: 700; color: var(--warn); font-size: 15px;">
+                    <span style="font-size: 22px;">⚠️</span>
+                    <span>CONFLITO INTERNO DETECTADO ENTRE MANOBRAS DA LISTA (${conflitosInternos.length})</span>
+                </div>
+                <div style="margin-top: 10px; font-size: 13px; color: var(--text-main);">
+                    ${conflitosInternos.map(c => `
+                        <div style="margin-top: 6px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid var(--warn);">
+                            <b>Manobra ${c.origem}</b> ↔ <b>Manobra ${c.destino}</b><br/>
+                            <span style="color: var(--text-muted); font-size: 12px;">Equipamentos em comum: <b>${(c.equipamentos || []).join(', ') || 'Nenhum'}</b> | Alimentadores: <b>${(c.alimentadores || []).join(', ') || 'Nenhum'}</b></span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Renderiza Sanfonas por Manobra Base se houver resultado_por_base
+    const resultadoPorBase = data.resultado_por_base || {};
+    const baseKeys = Object.keys(resultadoPorBase);
+
+    if (baseKeys.length > 0) {
+        baseKeys.forEach((mBase, idx) => {
+            const info = resultadoPorBase[mBase];
+            const conflicts = info.conflitos || [];
+            const confCount = conflicts.length;
+            const hasConf = confCount > 0;
+            
+            let badgeHtml = '';
+            if (hasConf) {
+                badgeHtml = `<span style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">⚠️ ${confCount} CONFLITO(S)</span>`;
+            } else {
+                badgeHtml = `<span style="background: rgba(16, 185, 129, 0.15); color: var(--accent); border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">✅ SEM CONFLITOS</span>`;
+            }
+
+            const isCollapsed = (baseKeys.length > 1) && (!hasConf) && (idx > 0);
+            const displayStyle = isCollapsed ? 'none' : 'block';
+
+            let tableHtml = '';
+            if (hasConf) {
+                tableHtml = `
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-muted);">
+                                <th style="padding: 8px 10px;">Manobra GDIS</th>
+                                <th style="padding: 8px 10px;">Situação</th>
+                                <th style="padding: 8px 10px;">Tipo Conflito</th>
+                                <th style="padding: 8px 10px;">Equipamentos</th>
+                                <th style="padding: 8px 10px;">Alimentadores</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${conflicts.map(c => `
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                    <td style="padding: 8px 10px;"><b>${c.manobra}</b></td>
+                                    <td style="padding: 8px 10px;">${(c.situacoes || []).join(', ')}</td>
+                                    <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: rgba(239,68,68,0.1); color: var(--danger); border-radius: 4px;">${c.tipo_conflito || 'CONFLITO'}</span></td>
+                                    <td style="padding: 8px 10px;">${(c.equipamentos || []).join('; ')}</td>
+                                    <td style="padding: 8px 10px;">${(c.alimentadores || []).join('; ')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } else {
+                tableHtml = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">✅ Nenhum conflito com manobras do GDIS no período.</div>`;
+            }
+
+            const eqptStr = (info.equipamentos || []).join(', ') || 'Nenhum';
+            const alimStr = (info.alimentadores || []).join(', ') || 'Nenhum';
+
+            accordionHtml += `
+                <div class="manobra-accordion-item" style="border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; background: rgba(255,255,255,0.02);">
+                    <div class="accordion-header" onclick="window.toggleConfAccordion('${mBase}')" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: rgba(255,255,255,0.04); cursor: pointer; user-select: none;">
+                        <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; color: var(--text-bright);">
+                            <i data-lucide="layers" style="width: 18px; height: 18px; color: var(--primary);"></i>
+                            <span>Manobra Base ${mBase}</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            ${badgeHtml}
+                            <i data-lucide="chevron-down" id="conf-acc-icon-${mBase}" style="width: 18px; height: 18px; transition: transform 0.2s; ${isCollapsed ? '' : 'transform: rotate(180deg);'}"></i>
+                        </div>
+                    </div>
+                    <div id="conf-acc-body-${mBase}" style="padding: 16px 20px; display: ${displayStyle}; border-top: 1px solid var(--border);">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 16px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px;">
+                            <span>🔧 Equipamentos: <b>${eqptStr}</b></span>
+                            <span>⚡ Alimentadores: <b>${alimStr}</b></span>
+                        </div>
+                        ${tableHtml}
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    accordionContainer.innerHTML = accordionHtml;
+
+    // Tabela Legada / Consolidada
+    const confTableReal = document.getElementById('conf-table-real');
     const tbody = document.getElementById('tbl-conf-body');
     tbody.innerHTML = '';
 
-    if (data.conflitos_internos) {
-        data.conflitos_internos.forEach(c => {
+    if (conflitosInternos.length > 0) {
+        conflitosInternos.forEach(c => {
             const tr = document.createElement('tr');
             tr.style.background = 'rgba(245, 158, 11, 0.05)';
-            tr.innerHTML = `<td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td>${c.origem} vs ${c.destino}</td><td>${c.equipamentos.join('; ')}</td><td>${c.alimentadores.join('; ')}</td>`;
+            tr.innerHTML = `<td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td>${c.origem} vs ${c.destino}</td><td>${(c.equipamentos || []).join('; ')}</td><td>${(c.alimentadores || []).join('; ')}</td>`;
             tbody.appendChild(tr);
         });
     }
 
-    if (data.conflitos) {
-        data.conflitos.forEach(c => {
+    if (conflitosGlobais.length > 0) {
+        conflitosGlobais.forEach(c => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td><b>${c.manobra}</b></td><td>${c.situacoes.join(', ')}</td><td>${c.equipamentos.join('; ')}</td><td>${c.alimentadores.join('; ')}</td>`;
+            tr.innerHTML = `<td><b>${c.manobra}</b></td><td>${(c.situacoes || []).join(', ')}</td><td>${(c.equipamentos || []).join('; ')}</td><td>${(c.alimentadores || []).join('; ')}</td>`;
             tbody.appendChild(tr);
         });
+    }
+
+    // Se renderizamos a visão de sanfona, a tabela consolidada só é exibida se não houver sanfonas ou para depuração
+    if (baseKeys.length > 0) {
+        confTableReal.style.display = 'none';
+    } else {
+        confTableReal.style.display = 'table';
     }
     
     const exportBtn = document.getElementById('lnk-conf-export');
@@ -832,6 +943,19 @@ function showConfResults(data) {
 
     if (window.lucide) lucide.createIcons();
 }
+
+window.toggleConfAccordion = function(mBase) {
+    const body = document.getElementById(`conf-acc-body-${mBase}`);
+    const icon = document.getElementById(`conf-acc-icon-${mBase}`);
+    if (!body) return;
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        if (icon) icon.style.transform = 'rotate(180deg)';
+    } else {
+        body.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+    }
+};
 
 // --- LÓGICA REGRAS ---
 async function startConferidorManobras(e) {
