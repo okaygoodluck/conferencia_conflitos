@@ -3,6 +3,7 @@ import re
 import getpass
 import threading
 import unicodedata
+import csv
 from playwright.sync_api import sync_playwright
 
 # Trava global para evitar que múltiplas threads escrevam no arquivo de cache simultaneamente
@@ -201,97 +202,17 @@ def _obter_regras_equipamentos():
         "61": ["MA64","MA65", "MA35","MA36", "MA77", "MAB9"], # CH PROTECAO SUB
     }
 
-def _carregar_dados_equipamentos():
-    """Lê o arquivo CSV local de equipamentos e retorna um dicionário"""
-    import json
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    caminho_csv = os.path.join(root_dir, "data", "equipamentos_gemini.csv")
-    
-    dados = {}
-    if not os.path.exists(caminho_csv):
-        print(f"[AVISO] Arquivo CSV local não encontrado:\n   {caminho_csv}")
-        return dados
-        
-    try:
-        import pandas as pd
-        # Tenta ler com separador ponto e vírgula e encoding comum no Brasil (caso gerado pelo Excel)
+def _carregar_dados_equipamentos(log_func=print):
+    """
+    Desativa a carga da base estática 'equipamentos_gemini.csv' para evitar dados obsoletos/não confiáveis,
+    forçando o sistema a utilizar extração dinâmica em tempo real (GDIS) e análise contextual dos dados.
+    """
+    if callable(log_func):
         try:
-            df = pd.read_csv(caminho_csv, sep=';', encoding='latin1', dtype=str)
-        except:
-            df = pd.read_csv(caminho_csv, sep=',', encoding='utf-8', dtype=str)
-            
-        df.fillna('', inplace=True)
-            
-        col_tele = next((c for c in df.columns if 'TELECONTROLADO' in str(c).upper()), None)
-        col_eqpto = next((c for c in df.columns if str(c).upper() in ['EQUIPAMENTO', 'CODIGO', 'NUMERO', 'CÓDIGO', 'EQPTO']), None)
-        col_posope = next((c for c in df.columns if 'POSOPE' in str(c).upper() or 'ESTADO' in str(c).upper()), None)
-        col_fases = next((c for c in df.columns if 'FASES' in str(c).upper() or 'FASE' in str(c).upper()), None)
-        cols_alim = [c for c in df.columns if 'ALIMENTADOR' in str(c).upper() or 'REFALM' in str(c).upper()]
-        col_num_local = next((c for c in df.columns if 'NUMERO-LOCAL' in str(c).upper()), None)
-        col_prefixo = next((c for c in df.columns if 'PREFIXO' in str(c).upper() or 'TIPO' in str(c).upper() or 'FAMILIA' in str(c).upper() or 'FAMÍLIA' in str(c).upper()), None)
-        
-        if not col_eqpto and len(df.columns) > 0:
-            col_eqpto = df.columns[0] # Fallback para a primeira coluna
-            
-        if col_eqpto:
-            vals_eqpto = df[col_eqpto].values
-            vals_tele = df[col_tele].values if col_tele else [''] * len(df)
-            vals_posope = df[col_posope].values if col_posope else [''] * len(df)
-            vals_fases = df[col_fases].values if col_fases else [''] * len(df)
-            vals_num_local = df[col_num_local].values if col_num_local else [''] * len(df)
-            vals_prefixo = df[col_prefixo].values if col_prefixo else [''] * len(df)
-            
-            # Lista de arrays de alimentadores
-            vals_alims = [df[c].values for c in cols_alim]
-            
-            # zip é imensamente mais rápido que iterrows
-            for row_idx in range(len(df)):
-                eq_val = vals_eqpto[row_idx]
-                t_val = vals_tele[row_idx]
-                p_val = vals_posope[row_idx]
-                f_val = vals_fases[row_idx]
-                nl_val = vals_num_local[row_idx]
-                
-                pref_val = str(vals_prefixo[row_idx]).strip() if col_prefixo else ""
-                if not pref_val and '-' in str(eq_val):
-                    p_part = str(eq_val).split('-')[0].strip()
-                    if p_part.isdigit():
-                        pref_val = p_part.zfill(2)
-                
-                # Coleta todos os alimentadores das colunas candidatas
-                alim_vals = []
-                for v_arr in vals_alims:
-                    v = str(v_arr[row_idx]).strip().upper()
-                    if v: alim_vals.append(v)
-                
-                eq = _norm_eqpto(str(eq_val))
-                tele = str(t_val).strip().upper() == 'T'
-                posope = str(p_val).strip().upper()
-                fases = str(f_val).strip().upper()
-                num_local = str(nl_val).strip().upper()
-                
-                record = {
-                    'telecontrolado': tele,
-                    'posope': posope,
-                    'fases': fases,
-                    'alimentadores': alim_vals, # Agora é uma lista
-                    'numero_local': num_local,
-                    'prefixo': pref_val
-                }
-                
-                # Indexa pela chave principal (equipamento)
-                if eq not in dados: dados[eq] = []
-                dados[eq].append(record)
-                
-                # Indexa também pelo NUMERO-LOCAL caso disponível
-                if num_local:
-                    if num_local not in dados: dados[num_local] = []
-                    dados[num_local].append(record)
-                    
-    except Exception as e:
-        print(f"[AVISO] Erro ao carregar dados do CSV: {e}")
-        
-    return dados
+            log_func("[INFO] Base estática CSV desativada: priorizando consulta e extração dinâmica em tempo real (GDIS).")
+        except Exception:
+            pass
+    return {}
 
 
 def _obter_prefixo_equipamento(eq, eq_data=None):
@@ -324,6 +245,174 @@ def _obter_prefixo_equipamento(eq, eq_data=None):
     return ""
 
 
+def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=None):
+    """
+    Verifica se o equipamento é telecontrolado.
+    1. Se o equipamento for monofásico (fases A, B ou C), NÃO possui telecontrole na distribuição.
+    2. Se os dados da topologia/solicitação/manobra indicarem explicitamente o estado de telecontrole (True/False), utiliza.
+    3. Se houver qualquer indicação textual de ser manual / sem telecontrole / chave faca, retorna False.
+    4. Se houver indicação textual de telecontrole / modo remoto, retorna True.
+    5. Se houver operação sendo realizada pelo COD ou macros telecontroladas (MA01/MA02 pelo COD, MA64, MA14, MA15, etc.), assume telecontrolado = True.
+    6. Por tipo/prefixo do equipamento:
+       - Prefixos '02', '19', '20', '21', '22', '23' trifásicos: Religadores de linha/SE e disjuntores são telecontrolados por padrão.
+       - Prefixo '28', '36', '37' (Chaves manuais): Retorna False por padrão.
+    """
+    eq_clean = str(eq_nome or '').strip()
+    prefixo = eq_clean.split('-')[0].strip() if '-' in eq_clean else ''
+
+    # Se o equipamento é monofásico, não é telecontrolado na rede de distribuição
+    fases = _obter_fases_equipamento(eq_nome, eq_data, manobra_items, sol_info)
+    if fases in ['A', 'B', 'C']:
+        return False
+
+    if eq_data and isinstance(eq_data, dict):
+        if eq_data.get('telecontrolado') is not None:
+            return bool(eq_data.get('telecontrolado'))
+        desc = (str(eq_data.get('tipo', '')) + ' ' + str(eq_data.get('descricao', '')) + ' ' + str(eq_data.get('comentario', ''))).upper()
+        if any(w in desc for w in ['MANUAL', 'SEM TELECONTROLE', 'NAO TELECONTROLADO', 'NÃO TELECONTROLADO', 'SEM MODULO', 'SEM MÓDULO', 'CHAVE FACA']):
+            return False
+        if any(w in desc for w in ['TELECONTROLADO', 'TELECONTROLADA', 'MODO REMOTO', 'AUTOMAÇÃO', 'AUTOMÁTICO', 'AUTOMATICO']):
+            return True
+
+    if sol_info and isinstance(sol_info, dict):
+        if sol_info.get('telecontrolado') is not None:
+            return bool(sol_info.get('telecontrolado'))
+        txt_sol = (str(sol_info.get('eq', '')) + ' ' + str(sol_info.get('local', '')) + ' ' + str(sol_info.get('observacao', ''))).upper()
+        if any(w in txt_sol for w in ['MANUAL', 'SEM TELECONTROLE', 'NAO TELECONTROLADO', 'NÃO TELECONTROLADO', 'SEM MODULO', 'SEM MÓDULO', 'CHAVE FACA']):
+            return False
+        if any(w in txt_sol for w in ['TELECONTROLADO', 'TELECONTROLADA', 'MODO REMOTO', 'AUTOMAÇÃO', 'AUTOMÁTICO', 'AUTOMATICO']):
+            return True
+
+    items = []
+    if isinstance(manobra_items, list):
+        items = manobra_items
+    elif isinstance(manobra_items, dict):
+        items = [manobra_items]
+
+    tem_operacao_cod = False
+    tem_macro_telecontrole = False
+
+    for mi in items:
+        if isinstance(mi, dict):
+            if mi.get('telecontrolado') is not None:
+                return bool(mi.get('telecontrolado'))
+            txt_mi = (str(mi.get('texto_linha', '')) + ' ' + str(mi.get('observacao', '')) + ' ' + str(mi.get('etapa_nome', ''))).upper()
+            if any(w in txt_mi for w in ['MANUAL', 'SEM TELECONTROLE', 'NAO TELECONTROLADO', 'NÃO TELECONTROLADO', 'SEM MODULO', 'SEM MÓDULO', 'CHAVE FACA']):
+                return False
+            if any(w in txt_mi for w in ['TELECONTROLADO', 'TELECONTROLADA', 'MODO REMOTO', 'AUTOMAÇÃO', 'AUTOMÁTICO', 'AUTOMATICO']):
+                return True
+            
+            execut = mi.get('executor', '').upper()
+            if re.search(r'\bCOD\b', execut):
+                tem_operacao_cod = True
+            
+            if re.search(r'\b\d*(MA64|MA65|MA14|MA15|MA16|MA17|MA52)\b', txt_mi):
+                tem_macro_telecontrole = True
+
+    # Se há operação remota executada pelo COD ou macros explícitas de telecontrole, é telecontrolado
+    if tem_operacao_cod or tem_macro_telecontrole:
+        return True
+
+    # Classificação padrão por prefixo do equipamento
+    # Subestação (21, 23), Reguladores (02), Religadores de Linha Trifásicos (19, 20, 22): Telecontrolados por padrão
+    if prefixo in ["02", "19", "20", "21", "22", "23"]:
+        return True
+
+    return False
+
+
+def _obter_limite_pre_desligamento(manobra_dados):
+    """
+    Retorna a cronologia máxima das etapas pré-desligamento (até o fim da etapa de DESLIGAMENTO ou antes do RELIGAMENTO).
+    Retorna -1 caso não haja etapas nem de DESLIGAMENTO nem de RELIGAMENTO.
+    """
+    limite_desligamento = -1
+    cron_primeiro_religamento = float('inf')
+
+    for mi in manobra_dados:
+        if not isinstance(mi, dict): continue
+        nome_etapa = (
+            str(mi.get('etapa_nome', '')) + ' ' + 
+            str(mi.get('etapa_texto_header', '')) + ' ' + 
+            str(mi.get('grupo_id', ''))
+        ).upper()
+        
+        cron = mi.get('cronologia', 0)
+        
+        if "DESLIGAMENTO" in nome_etapa and "RELIGAMENTO" not in nome_etapa:
+            limite_desligamento = max(limite_desligamento, cron)
+        if "RELIGAMENTO" in nome_etapa:
+            if cron > 0:
+                cron_primeiro_religamento = min(cron_primeiro_religamento, cron)
+
+    if limite_desligamento != -1:
+        return limite_desligamento
+    elif cron_primeiro_religamento != float('inf'):
+        return cron_primeiro_religamento - 1
+    return -1
+
+
+def _obter_fases_equipamento(eq_nome, eq_data=None, mi=None, sol_info=None):
+    """
+    Identifica o número de fases do equipamento ('ABC', 'A', 'B', 'C').
+    Prioriza topologia/cadastro, dados da solicitação e inspeção ampla de texto dos itens da manobra.
+    """
+    if eq_data and isinstance(eq_data, dict):
+        if eq_data.get('fases'):
+            f = str(eq_data.get('fases')).strip().upper()
+            if f in ['A', 'B', 'C', 'ABC']: return f
+            if any(k in f for k in ['MONO', '1', 'UNIP']): return 'A'
+        desc = (str(eq_data.get('tipo', '')) + ' ' + str(eq_data.get('descricao', '')) + ' ' + str(eq_data.get('nome', '')) + ' ' + str(eq_data.get('comentario', ''))).upper()
+        if any(w in desc for w in ['MONOFASICO', 'MONOFÁSICO', 'MONOFASICA', 'MONOFÁSICA', 'UNIPOLAR']):
+            return 'A'
+
+    if sol_info and isinstance(sol_info, dict):
+        if sol_info.get('fases'):
+            f = str(sol_info.get('fases')).strip().upper()
+            if f in ['A', 'B', 'C', 'ABC']: return f
+            if any(k in f for k in ['MONO', '1', 'UNIP']): return 'A'
+        txt_sol = (str(sol_info.get('eq', '')) + ' ' + str(sol_info.get('local', '')) + ' ' + str(sol_info.get('observacao', ''))).upper()
+        if any(w in txt_sol for w in ['MONOFASICO', 'MONOFÁSICO', 'MONOFASICA', 'MONOFÁSICA', 'UNIPOLAR']):
+            return 'A'
+
+    items_to_check = []
+    if isinstance(mi, list):
+        items_to_check = mi
+    elif isinstance(mi, dict):
+        items_to_check = [mi]
+
+    for item in items_to_check:
+        if not isinstance(item, dict): continue
+        if item.get('fases'):
+            f = str(item.get('fases')).strip().upper()
+            if f in ['A', 'B', 'C', 'ABC']: return f
+            if any(k in f for k in ['MONO', '1', 'UNIP']): return 'A'
+        
+        txt_full = (
+            str(item.get('texto_linha', '')) + ' ' + 
+            str(item.get('observacao', '')) + ' ' + 
+            str(item.get('acao_bruta', '')) + ' ' + 
+            str(item.get('equipamento', '')) + ' ' +
+            str(item.get('etapa_nome', '')) + ' ' +
+            str(item.get('etapa_texto_header', '')) + ' ' +
+            str(item.get('local', '')) + ' ' +
+            str(item.get('posicionamento', ''))
+        ).upper()
+
+        if re.search(r'\bFASE\s*[-_]?\s*B\b|\bFASEB\b', txt_full) and not re.search(r'\bSUBSTATION\b', txt_full):
+            return 'B'
+        if re.search(r'\bFASE\s*[-_]?\s*C\b|\bFASEC\b', txt_full) and not re.search(r'\bSUBSTATION\b', txt_full):
+            return 'C'
+
+        if re.search(r'\bFASE\s*[-_]?\s*A\b|\bFASEA\b|\bMONOF[ÁA]SIC[AO]\b|\bUNIPOLAR\b|\b1\s*FASE\b', txt_full):
+            return 'A'
+
+    eq_upper = str(eq_nome or '').upper()
+    if re.search(r'\bFASE\s*[-_]?\s*B\b|\bFASEB\b', eq_upper): return 'B'
+    if re.search(r'\bFASE\s*[-_]?\s*C\b|\bFASEC\b', eq_upper): return 'C'
+    if re.search(r'\bFASE\s*[-_]?\s*A\b|\bFASEA\b|\bMONOF[ÁA]SIC[AO]\b|\bUNIPOLAR\b', eq_upper): return 'A'
+
+    return 'ABC'
 
 def main(manobra_param=None, usuario_param=None, senha_param=None, headless=False):
     print("=====================================================")
@@ -634,7 +723,9 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         # Como o GDIS envelopa etapas em painéis JSF, usamos a sequência numérica literal.
         bloco_atual = 1
         ultimo_n = -1
-        for mi in manobra_dados:
+        for idx, mi in enumerate(manobra_dados, start=1):
+            if 'cronologia' not in mi or not mi['cronologia']:
+                mi['cronologia'] = idx
             n = ultimo_n + 10
             # Pega o número real da coluna Nº caso exista no texto (ex: "10 MA31... ")
             partes = mi.get('texto_linha', '').split()
@@ -906,7 +997,9 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         sol_dict[eq_norm] = obj
 
     manobra_map = {}
-    for item in manobra_dados:
+    for idx, item in enumerate(manobra_dados, start=1):
+        if 'cronologia' not in item or not item['cronologia']:
+            item['cronologia'] = idx
         eq = _norm_eqpto(item.get('equipamento'))
         if not eq or eq == '-':
             continue # Ignora etapas puramente de cabeçalho
@@ -922,7 +1015,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             'observacao': _norm_str(item.get('observacao')),
             'etapa_nome': _norm_str(item.get('etapa_nome')),
             'etapa_texto_header': _norm_str(item.get('etapa_texto_header')),
-            'grupo_id': item.get('grupo_id', 'Bloco_Desconhecido')
+            'grupo_id': item.get('grupo_id', 'Bloco_Desconhecido'),
+            'cronologia': item.get('cronologia', idx)
         })
 
     # Texto completo para buscas globais
@@ -1229,6 +1323,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     # REGRA 29 (Verificação de Anormalidade por Alimentador)
     contagem_alim = {}
     verificacao_cod_ma09 = set()
+    alimentadores_isentos = set()
     for mi in manobra_dados:
         alim = mi.get('alimentador', '').strip()
         eq = mi.get('equipamento', '').strip()
@@ -1237,6 +1332,15 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         # Se for um item de alimentador puro (Ex: PIUD217) no campo equipamento
         if bool(re.search(r'[A-Za-z]', eq)) and bool(re.search(r'[0-9]', eq)) and ('-' not in eq) and eq != '-' and not eff_alim:
             eff_alim = eq
+
+        # Fallback de busca de alimentador pelo equipamento se eff_alim ainda não foi encontrado
+        if not eff_alim and eq:
+            if eq in sol_dict:
+                eff_alim = sol_dict[eq].get('alim')
+            if not eff_alim:
+                eq_info = _get_eq_data(dados_equipamentos, eq, '')
+                if isinstance(eq_info, dict):
+                    eff_alim = eq_info.get('alim')
             
         if eff_alim:
             contagem_alim[eff_alim] = contagem_alim.get(eff_alim, 0) + 1
@@ -1246,6 +1350,20 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         ob = mi.get('observacao', '')
         execut_cod = mi.get('executor', '')
         
+        # Checar se é uma etapa de MANOBRA PELO TÉCNICO com comentário de GERADOR ou DISJUNTOR DE INTERLIGAÇÃO
+        txt_completo_item = f"{et} {tx} {ob} {eq}".upper()
+        txt_sem_acento = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], txt_completo_item)
+        
+        is_manobra_tecnico = "MANOBRA PELO TECNICO" in txt_sem_acento
+        tem_isencao_gerador = any(termo in txt_sem_acento for termo in [
+            "GERADOR DE BT",
+            "GERADOR DE MT",
+            "DISJUNTOR DE INTERLIGACAO"
+        ])
+        
+        if is_manobra_tecnico and tem_isencao_gerador and eff_alim:
+            alimentadores_isentos.add(eff_alim)
+            
         is_cod_executando = bool(re.search(r'\bCOD\b', execut_cod, re.IGNORECASE)) or bool(re.search(r'\bVERIFICA[CÇ]?[AÃ]?O\s*(?:PELO|DO|DA)?\s*COD\b', et + " " + tx + " " + ob, re.IGNORECASE))
         if is_cod_executando and re.search(r'\b\d*MA09\b', tx + " " + ob, re.IGNORECASE):
             if eff_alim: 
@@ -1254,11 +1372,11 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 # Se houver MA09 mas o alimentador estiver em branco, alerta especificamente
                 print(f"   ⚠️  REGRA 29: ALERTA (Detectada ação MA09 pelo COD, mas o campo 'Alimentador' está vazio na linha. Não é possível vincular a Verificação!).")
 
-    falhas_r29 = [f"Detectado Alimentador em manobra sem ação MA09 na Verificação pelo COD. (Falha no: '{a}')" for a, c in contagem_alim.items() if a not in verificacao_cod_ma09]
+    falhas_r29 = [f"Detectado Alimentador em manobra sem ação MA09 na Verificação pelo COD. (Falha no: '{a}')" for a, c in contagem_alim.items() if a not in verificacao_cod_ma09 and a not in alimentadores_isentos]
     if falhas_r29:
         for f in sorted(falhas_r29): print(f"   ❌ REGRA 29: FALHA ({f})")
     elif contagem_alim:
-        print("   ✅ REGRA 29: OK (Todos os alimentadores envolvidos possuem verificação MA09 vinculada).")
+        print("   ✅ REGRA 29: OK (Todos os alimentadores envolvidos possuem verificação MA09 vinculada ou são isentos por se tratarem de Geradores/Interligação de SE fictícia).")
 
     print("\n>>> FASE 3: CRUZAMENTO DE IDENTIDADE DA SOLICITAÇÃO")
     if not sol_locais:
@@ -1330,6 +1448,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     locais_str = ", ".join(locais_found) if locais_found else "Nenhum"
                     print(f"   ❌ REGRA 4: FALHA (Equipamento '{eq}' com Local divergente. Esperado: {sol_local}, Encontrado: {locais_str}).")
 
+    limite_cronologia_desligamento = _obter_limite_pre_desligamento(manobra_dados)
 
     print("\n>>> FASE 4: RESTRIÇÕES FÍSICAS E JURISDIÇÃO (ENGENHARIA)")
     if not manobra_map:
@@ -1342,7 +1461,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         alim_manobra = manobra_items[0].get('alim', '')
         local_manobra = manobra_items[0].get('local', '')
         eq_data = _get_eq_data(dados_equipamentos, eq, alim_manobra, sol_alim, local_manobra)
-        is_telecontrolado = eq_data.get('telecontrolado', False)
+        is_telecontrolado = _verificar_telecontrole(eq, eq_data, manobra_items)
         
         # REGRA 31: ESTADO DO EQUIPAMENTO
         # Verifica se o equipamento está sendo aberto/fechado em coerência com seu estado atual no Gemini
@@ -1389,6 +1508,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         # REGRA 31 (Coerência de POSOPE: Abertura em NF, Fechamento em NA)
         posope = eq_data.get('posope', '')
         estado_simulado = posope
+        is_primeiro_item_eq = True
         primeira_acao = None
         erro_31 = []
         
@@ -1396,8 +1516,11 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         macros_fechamento = re.compile(r'\b\d*(MA02|MA66|MA67|MA19|MA23|MA25|MA55|MA57|MAB1)\b(?!\s*-\s*OUTROS)')
         
         for mi in manobra_items:
-            etapa_txt = (mi.get('etapa_nome', '') + ' ' + mi.get('etapa_texto_header', '')).upper()
             txt = mi['texto_linha'].upper()
+            if is_primeiro_item_eq:
+                if "MA39" in txt: estado_simulado = "A"
+                elif "MA49" in txt: estado_simulado = "F"
+                is_primeiro_item_eq = False
             
             is_abertura = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
             is_fechamento = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
@@ -1405,9 +1528,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             if is_abertura:
                 if not primeira_acao: primeira_acao = 'ABRIR'
                 if estado_simulado == 'A':
-                    # Falha: Abrindo algo que já está aberto ou que acabamos de abrir
-                    # Nota: ignoramos etapas de normalização PARA O ALERTA INICIAL se o usuário quiser ser flexível, 
-                    # mas para SEGURANÇA, abrir o que já está aberto é sempre erro de instrução.
                     msg = f"Abrindo equipamento que já consta como Aberto (Estado Atual={estado_simulado})"
                     erro_31.append(msg)
                 estado_simulado = 'A'
@@ -1418,12 +1538,49 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     erro_31.append(msg)
                 estado_simulado = 'F'
 
-        if posope in ['A', 'F']:
+        # --- DETECÇÃO DE BATE-VOLTA / REVERSÃO PREMATURA NAS ETAPAS PRÉ-DESLIGAMENTO ---
+        historico_pre_desligamento = []
+        for mi in manobra_items:
+            etapa_raw = mi.get('etapa_texto_header') or mi.get('etapa_nome') or mi.get('grupo_id') or 'Etapa'
+            m_etapa = re.search(r'(\d{2,3}\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ]+)', etapa_raw, re.IGNORECASE)
+            etapa_nome_limpo = m_etapa.group(1).title() if m_etapa else etapa_raw.strip()
+            
+            txt = mi['texto_linha'].upper()
+            cron = mi.get('cronologia', 0)
+            is_ab = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
+            is_fe = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
+            
+            eh_pre_desligamento = (limite_cronologia_desligamento == -1) or (cron <= limite_cronologia_desligamento)
+            
+            if eh_pre_desligamento:
+                if is_ab:
+                    historico_pre_desligamento.append((etapa_nome_limpo, 'ABRIR'))
+                elif is_fe:
+                    historico_pre_desligamento.append((etapa_nome_limpo, 'FECHAR'))
+
+        for idx in range(len(historico_pre_desligamento) - 1):
+            et_1, act_1 = historico_pre_desligamento[idx]
+            et_2, act_2 = historico_pre_desligamento[idx+1]
+            if act_1 != act_2:
+                msg = f"Reversão prematura pré-desligamento na {et_2} ({act_2} após {act_1} na {et_1}). Essa alteração desfaz o alívio prévio e pode provocar corte indevido de clientes."
+                erro_31.append(msg)
+
+        # --- REGRA 31: EVOLUÇÃO DO ESTADO POSOPE / SEQUÊNCIA OPERATIVA ---
+        if posope in ['A', 'F'] or primeira_acao or erro_31:
             if erro_31:
                 str_erros = " | ".join(sorted(set(erro_31)))
                 print(f"   ❌ REGRA 31: FALHA (Equipamento '{eq}': {str_erros}).")
             elif primeira_acao:
-                print(f"   ✅ REGRA 31: OK (Equipamento '{eq}': Ações coerentes com a evolução do estado POSOPE={posope}).")
+                if posope in ['A', 'F']:
+                    print(f"   ✅ REGRA 31: OK (Equipamento '{eq}': Ações coerentes com a evolução do estado POSOPE={posope}).")
+                else:
+                    print(f"   ✅ REGRA 31: OK (Equipamento '{eq}': Ações de {primeira_acao} coerentes na sequência operativa).")
+            else:
+                tem_sinc = any(re.search(r'\b\d*(MA39|MA49)\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
+                if tem_sinc:
+                    print(f"   ℹ️ REGRA 31: INFO (Estado de '{eq}' sincronizado via macro de supervisão MA39/MA49).")
+                elif posope in ['A', 'F']:
+                    print(f"   ✅ REGRA 31: OK (Equipamento '{eq}' manteve estado estável POSOPE={posope}).")
         else:
             pass  # IGNORADA silenciosa
 
@@ -1600,7 +1757,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         if not is_prefixo_valido:
                             falhas_r15.add(m_op.upper())
                             motivos_r15.add("Prefixo não permitido para operação remota")
-                        elif not eq_data.get('telecontrolado', False):
+                        elif not is_telecontrolado:
                             falhas_r15.add(m_op.upper())
                             motivos_r15.add("Equipamento não possui telecontrole")
                         elif prefixo == "02" and m_op.upper() in ["MA01", "MA02", "MA31", "MA30"]:
@@ -1747,11 +1904,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     if not manobra_map:
         print("⚠️  Manobra vazia. Sem equipamentos manobrados.")
         
-    limite_cronologia_desligamento = -1
-    for mi in manobra_dados:
-        nome_etapa = mi.get('etapa_nome', '').upper()
-        if "DESLIGAMENTO" in nome_etapa and "RELIGAMENTO" not in nome_etapa:
-            limite_cronologia_desligamento = max(limite_cronologia_desligamento, mi.get('cronologia', 0))
+    limite_cronologia_desligamento = _obter_limite_pre_desligamento(manobra_dados)
 
     for eq, manobra_items in manobra_map.items():
         print(f"\n🔹 Equipamento: {eq}")
@@ -1773,6 +1926,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Ação inicial completa de Abertura e Sinalização - MA31/MA30 confirmada até o desligamento).")
             elif tem_ma01 and tem_sinalizacao:
                 print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Abertura (MA01) e Sinalização (MA06) confirmadas até o desligamento).")
+            elif tem_sinalizacao and not tem_ma01:
+                print(f"   ✅ REGRA 2: OK (Equipamento '{eq}': Sinalização (MA06) confirmada até o desligamento - Equipamento de delimitação NA/NF).")
             elif tem_ma01 and not tem_sinalizacao:
                 print(f"   ⚠️  REGRA 2: ALERTA (Equipamento '{eq}' possui abertura MA01 até o desligamento, mas falta a sinalização MA06 para isolamento do trecho).")
             else:
@@ -1942,7 +2097,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 if get_etapa_ident(mi) != eh_grupo: continue
                 txt = mi['texto_linha'].upper()
                 alim_key = mi.get('alim', '') or 'SEM_ALIM'
-                fases_eq = _get_eq_data(dados_equipamentos, eq_map, mi.get('alim', '')).get('fases', '')
+                eq_info = _get_eq_data(dados_equipamentos, eq_map, mi.get('alim', ''))
+                fases_eq = _obter_fases_equipamento(eq_map, eq_info, mi)
                 if not fases_eq: continue
                 if re.search(r'\b\d*(MA01|MA31|MA30|MA18|MA22|MA24|MA54|MA56|MAA9)\b(?!\s*-\s*OUTROS)', txt) or re.search(r'\bABRIR\b', txt):
                     abertos_por_alim.setdefault(alim_key, []).append((eq_map, fases_eq))
@@ -2081,13 +2237,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
     
     def _is_eq_telecontrolado(eq_nome, info_eq=None):
-        eq_clean = str(eq_nome or '').strip()
-        prefixo = eq_clean.split('-')[0].strip() if '-' in eq_clean else ''
-        if prefixo in ['22', '23']:
-            return True
-        if info_eq and isinstance(info_eq, dict):
-            return bool(info_eq.get('telecontrolado', False))
-        return False
+        return _verificar_telecontrole(eq_nome, eq_data=info_eq)
 
     # Agrupar itens por etapa de Pique
     etapas_pique = {} # key: grupo_id, value: list of items
@@ -2201,6 +2351,121 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         for f in set(falhas_r44): print(f"   ❌ REGRA 44: FALHA ({f}).")
     elif etapas_pique:
         print("   ✅ REGRA 44: OK (Cabeçalho CP:xx, macros MA27/MA79 e sequência de Manobra com Pique validados com sucesso).")
+
+    # REGRA 31.B (Validação de Sequência da Transferência de Carga - Tronco x Socorro)
+    print("\n=== FASE: Validação de Sequência da Transferência de Carga (Regra 31.B) ===")
+    falhas_r31b = []
+    fechamentos_tensao = []
+    aberturas_tensao = []
+    
+    macros_abertura_r31 = re.compile(r'\b\d*(MA01|MA31|MA30|MA18|MA22|MA24|MA54|MA56|MAA9)\b(?!\s*-\s*OUTROS)', re.IGNORECASE)
+    macros_fechamento_r31 = re.compile(r'\b\d*(MA02|MA66|MA67|MA19|MA23|MA25|MA55|MA57|MAB1)\b(?!\s*-\s*OUTROS)', re.IGNORECASE)
+
+    limite_cronologia_desligamento = _obter_limite_pre_desligamento(manobra_dados)
+    for mi in manobra_dados:
+        cron = mi.get('cronologia', 0)
+        eh_pre = (limite_cronologia_desligamento == -1) or (cron <= limite_cronologia_desligamento)
+        if not eh_pre:
+            continue
+            
+        eq = mi.get('equipamento') or mi.get('numeq') or ''
+        if not eq:
+            continue
+            
+        txt = mi.get('texto_linha', '').upper()
+        obs = mi.get('observacao', '').upper()
+        
+        etapa_raw = mi.get('etapa_texto_header') or mi.get('etapa_nome') or mi.get('grupo_id') or 'Etapa'
+        m_etapa = re.search(r'(\d{2,3}\s+[A-ZÁÉÍÓÚÂÊÔÃÕÇ]+)', etapa_raw, re.IGNORECASE)
+        etapa_nome_limpo = m_etapa.group(1).title() if m_etapa else etapa_raw.strip()
+        
+        is_sem_tensao = any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
+        is_ab = bool(macros_abertura_r31.search(txt) or re.search(r'\bABRIR\b', txt))
+        is_fe = bool(macros_fechamento_r31.search(txt) or re.search(r'\bFECHAR\b', txt))
+        
+        if not is_sem_tensao:
+            if is_fe:
+                fechamentos_tensao.append({'eq': eq, 'cron': cron, 'etapa': etapa_nome_limpo, 'mi': mi})
+            elif is_ab:
+                aberturas_tensao.append({'eq': eq, 'cron': cron, 'etapa': etapa_nome_limpo, 'mi': mi})
+
+    if aberturas_tensao:
+        for ab in aberturas_tensao:
+            eq_ab = ab['eq']
+            cron_ab = ab['cron']
+            et_ab = ab['etapa']
+            
+            is_solicitacao_boundary = any(_norm_eqpto(eq_ab) == _norm_eqpto(sol_eq) for sol_eq in sol_dict.keys())
+            if not is_solicitacao_boundary:
+                digits_ab = set(re.findall(r'\b\d{5,7}\b', eq_ab))
+                if digits_ab:
+                    for sol_eq in sol_dict.keys():
+                        digits_sol = set(re.findall(r'\b\d{5,7}\b', sol_eq))
+                        if digits_ab & digits_sol:
+                            is_solicitacao_boundary = True
+                            break
+            if not is_solicitacao_boundary and any(m in txt for m in ["MAB6", "MA88", "MAB7", "MA90"]):
+                is_solicitacao_boundary = True
+            
+            fechamentos_previos = [fe for fe in fechamentos_tensao if fe['cron'] <= cron_ab]
+            
+            if not is_solicitacao_boundary:
+                if not fechamentos_previos:
+                    fechamento_posterior = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
+                    if fechamento_posterior:
+                        fe_post = fechamento_posterior[0]
+                        falhas_r31b.append(
+                            f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}) ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}). Isso provoca pique/corte não programado de clientes."
+                        )
+                    else:
+                        falhas_r31b.append(
+                            f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
+                        )
+
+    if falhas_r31b:
+        for f in set(falhas_r31b):
+            print(f"   ❌ REGRA 31.B: FALHA ({f}).")
+    else:
+        print("   ✅ REGRA 31.B: OK (Sequência cronológica da transferência de carga Tronco x Socorro validada com sucesso).")
+
+    # REGRA 45 (Bloqueio de ST - MA15 em Religadores Trifásicos na Operação em Anel/Paralelo com Tensão)
+    print("\n=== FASE: Proteção e Seletividade em Anel (Regra 45) ===")
+    falhas_r45 = []
+    religadores_trifasicos = set()
+    ma15_religadores = set()
+    anel_fechado = False
+    
+    for mi in manobra_dados:
+        eq = mi.get('equipamento') or mi.get('numeq') or ''
+        alim = mi.get('alim', '')
+        txt = mi.get('texto_linha', '').upper()
+        
+        if eq:
+            eq_prefixo = _obter_prefixo_equipamento(eq, _get_eq_data(dados_equipamentos, eq, alim))
+            if eq_prefixo == "22":
+                eq_info = _get_eq_data(dados_equipamentos, eq, alim)
+                fases = _obter_fases_equipamento(eq, eq_info, mi)
+                if fases == "ABC":
+                    religadores_trifasicos.add(eq)
+        
+        if re.search(r'\b\d*MA15\b', txt) or "BLOQUEAR ST" in txt:
+            if eq:
+                ma15_religadores.add(eq)
+        
+        if (re.search(r'\b\d*(MA02|MA04|MA39|MA66|MA67|MAB1)\b', txt) or "FECHAR" in txt) and ("NA" in txt or "PARALELO" in txt or "ANEL" in txt):
+            anel_fechado = True
+            et_nome = mi.get('etapa_nome', '')
+            for r_eq in religadores_trifasicos:
+                if r_eq not in ma15_religadores:
+                    falhas_r45.append(f"Etapa '{et_nome}': Operação em anel/paralelo com tensão realizada sem bloqueio de ST (MA15) prévio no Religador Trifásico '{r_eq}'.")
+
+    if falhas_r45:
+        for f in set(falhas_r45): print(f"   ❌ REGRA 45: FALHA ({f}).")
+    elif anel_fechado:
+        print("   ✅ REGRA 45: OK (Bloqueio de ST - MA15 validado em todos os religadores trifásicos envolvidos na operação em anel com tensão).")
+    else:
+        print("   ✅ REGRA 45: OK (Operação em anel/paralelo com tensão não identificada ou sem restrições de ST).")
+
 
     # ============================================================
     # FIM DA VERIFICAÇÃO

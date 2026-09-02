@@ -64,6 +64,8 @@ def _run_conferidor(job_id, manobra, user, passwd):
         capture.flush()
 
     try:
+        import importlib
+        importlib.reload(conferidor_manobras)
         # Passa o cache se disponível para evitar recarregar o CSV de 40MB
         with STATE_LOCK:
             eq_cache = CACHE["equipamentos"]
