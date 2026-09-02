@@ -765,7 +765,17 @@ function showConfResults(data) {
 
     const conflitosInternos = data.conflitos_internos || [];
     const conflitosGlobais = data.conflitos || [];
-    const totalConflicts = conflitosGlobais.length + conflitosInternos.length;
+    const resultadoPorBase = data.resultado_por_base || {};
+    const baseKeys = Object.keys(resultadoPorBase);
+
+    // Calcula total global de conflitos somando os conflitos das bases
+    let totalConflicts = conflitosGlobais.length;
+    if (baseKeys.length > 0) {
+        totalConflicts = baseKeys.reduce((acc, k) => acc + (resultadoPorBase[k].conflitos || []).length, 0);
+    } else {
+        totalConflicts += conflitosInternos.length;
+    }
+
     const hasConflicts = totalConflicts > 0;
     const elapsed = data.elapsed_seconds ? (data.elapsed_seconds + 's') : (data.elapsed || '0s');
 
@@ -786,7 +796,7 @@ function showConfResults(data) {
     const bannerBorder = hasConflicts ? 'rgba(239, 68, 68, 0.35)' : 'rgba(16, 185, 129, 0.35)';
     const bannerColor = hasConflicts ? 'var(--danger)' : 'var(--accent)';
     const icon = hasConflicts ? '⚠️' : '✅';
-    const subText = `${totalConflicts} conflito(s) [${conflitosGlobais.length} GDIS, ${conflitosInternos.length} interno(s)] em ${totalManobrasGdis} manobra(s) pesquisadas (${elapsed}).`;
+    const subText = `${totalConflicts} conflito(s) em ${totalManobrasGdis} manobra(s) pesquisadas (${elapsed}).`;
 
     summaryBar.innerHTML = `
         <div class="alert-banner" style="background: ${bannerBg}; border: 1px solid ${bannerBorder}; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
@@ -802,36 +812,13 @@ function showConfResults(data) {
         </div>
     `;
 
-    // Renderização do container de Accordion e Conflitos Internos
+    // Renderização do container de Accordion
     const accordionContainer = document.getElementById('conf-accordion-container');
     accordionContainer.innerHTML = '';
 
     let accordionHtml = '';
 
-    // Alerta de Conflitos Internos destacados no topo
-    if (conflitosInternos.length > 0) {
-        accordionHtml += `
-            <div class="alert-banner warning-banner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">
-                <div style="display: flex; align-items: center; gap: 12px; font-weight: 700; color: var(--warn); font-size: 15px;">
-                    <span style="font-size: 22px;">⚠️</span>
-                    <span>CONFLITO INTERNO DETECTADO ENTRE MANOBRAS DA LISTA (${conflitosInternos.length})</span>
-                </div>
-                <div style="margin-top: 10px; font-size: 13px; color: var(--text-main);">
-                    ${conflitosInternos.map(c => `
-                        <div style="margin-top: 6px; padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid var(--warn);">
-                            <b>Manobra ${c.origem}</b> ↔ <b>Manobra ${c.destino}</b><br/>
-                            <span style="color: var(--text-muted); font-size: 12px;">Equipamentos em comum: <b>${(c.equipamentos || []).join(', ') || 'Nenhum'}</b> | Alimentadores: <b>${(c.alimentadores || []).join(', ') || 'Nenhum'}</b></span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-
-    // Renderiza Sanfonas por Manobra Base se houver resultado_por_base
-    const resultadoPorBase = data.resultado_por_base || {};
-    const baseKeys = Object.keys(resultadoPorBase);
-
+    // Renderiza Sanfonas por Manobra Base
     if (baseKeys.length > 0) {
         baseKeys.forEach((mBase, idx) => {
             const info = resultadoPorBase[mBase];
@@ -855,7 +842,7 @@ function showConfResults(data) {
                     <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px;">
                         <thead>
                             <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-muted);">
-                                <th style="padding: 8px 10px;">Manobra GDIS</th>
+                                <th style="padding: 8px 10px;">Manobra Conflitante</th>
                                 <th style="padding: 8px 10px;">Situação</th>
                                 <th style="padding: 8px 10px;">Tipo Conflito</th>
                                 <th style="padding: 8px 10px;">Equipamentos</th>
@@ -863,20 +850,31 @@ function showConfResults(data) {
                             </tr>
                         </thead>
                         <tbody>
-                            ${conflicts.map(c => `
+                            ${conflicts.map(c => {
+                                const isInterno = c.is_interno || (c.situacoes && c.situacoes.includes('LOTE_INTERNO'));
+                                const sitBg = isInterno ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.08)';
+                                const sitColor = isInterno ? 'var(--warn)' : 'var(--text-main)';
+                                const sitLabel = isInterno ? 'LOTE INTERNO' : (c.situacoes || []).join(', ');
+
+                                const typeBg = isInterno ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)';
+                                const typeColor = isInterno ? 'var(--warn)' : 'var(--danger)';
+                                const typeLabel = c.tipo_conflito || 'CONFLITO';
+
+                                return `
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                                     <td style="padding: 8px 10px;"><b>${c.manobra}</b></td>
-                                    <td style="padding: 8px 10px;">${(c.situacoes || []).join(', ')}</td>
-                                    <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: rgba(239,68,68,0.1); color: var(--danger); border-radius: 4px;">${c.tipo_conflito || 'CONFLITO'}</span></td>
-                                    <td style="padding: 8px 10px;">${(c.equipamentos || []).join('; ')}</td>
-                                    <td style="padding: 8px 10px;">${(c.alimentadores || []).join('; ')}</td>
+                                    <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${sitBg}; color: ${sitColor}; border-radius: 4px; font-weight: 600;">${sitLabel}</span></td>
+                                    <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${typeBg}; color: ${typeColor}; border-radius: 4px; font-weight: 600;">${typeLabel}</span></td>
+                                    <td style="padding: 8px 10px;">${(c.equipamentos || []).join('; ') || '-'}</td>
+                                    <td style="padding: 8px 10px;">${(c.alimentadores || []).join('; ') || '-'}</td>
                                 </tr>
-                            `).join('')}
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
                 `;
             } else {
-                tableHtml = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">✅ Nenhum conflito com manobras do GDIS no período.</div>`;
+                tableHtml = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted);">✅ Nenhum conflito identificado para esta manobra no período.</div>`;
             }
 
             const eqptStr = (info.equipamentos || []).join(', ') || 'Nenhum';

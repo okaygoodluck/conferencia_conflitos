@@ -486,6 +486,26 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
     for m_base in base_manobras_list:
         b_data = bases_data.get(m_base, {})
         c_list = [c for c in conflitos if c.get("base_origem") == m_base]
+
+        # Anexa conflitos internos do lote pertencentes a esta manobra base
+        for ci in conflitos_internos:
+            other_m = None
+            if ci["origem"] == m_base:
+                other_m = ci["destino"]
+            elif ci["destino"] == m_base:
+                other_m = ci["origem"]
+
+            if other_m:
+                c_list.append({
+                    "base_origem": m_base,
+                    "manobra": other_m,
+                    "equipamentos": ci["equipamentos"],
+                    "alimentadores": ci["alimentadores"],
+                    "situacoes": ["LOTE_INTERNO"],
+                    "tipo_conflito": "CONFLITO INTERNO (LOTE)",
+                    "is_interno": True
+                })
+
         resultado_por_base[m_base] = {
             "manobra": m_base,
             "equipamentos": sorted(b_data.get("eq") or []),
