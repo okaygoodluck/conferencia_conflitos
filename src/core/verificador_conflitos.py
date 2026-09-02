@@ -17,6 +17,61 @@ SITUACOES_LABEL = {
 }
 
 
+from datetime import date
+
+
+def _parse_date_obj(d_str):
+    """
+    Converte string de data (ex: '10/09/2026', '10/09/2026 08:00', '2026-09-10') em datetime.date.
+    """
+    if not d_str or not isinstance(d_str, str):
+        return None
+    d_str = d_str.strip()
+    if not d_str or d_str.lower() in ("undefined", "não definido", "null", "none"):
+        return None
+
+    parts = d_str.split()
+    date_part = parts[0]
+
+    if '/' in date_part:
+        sub = date_part.split('/')
+        if len(sub) == 3:
+            try:
+                return date(int(sub[2]), int(sub[1]), int(sub[0]))
+            except (ValueError, TypeError):
+                pass
+    elif '-' in date_part:
+        sub = date_part.split('-')
+        if len(sub) == 3:
+            try:
+                return date(int(sub[0]), int(sub[1]), int(sub[2]))
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
+def _datas_sobrepoem(ini1_str, fim1_str, ini2_str, fim2_str):
+    """
+    Verifica se dois intervalos de data se sobrepõem.
+    Retorna False apenas se puder comprovar que as datas não se sobrepõem.
+    """
+    d1_start = _parse_date_obj(ini1_str)
+    d1_end = _parse_date_obj(fim1_str) or d1_start
+    d2_start = _parse_date_obj(ini2_str)
+    d2_end = _parse_date_obj(fim2_str) or d2_start
+
+    if not d1_start or not d2_start:
+        return True  # Por segurança, assume sobreposição se não puder extrair a data
+
+    if d1_start > d1_end:
+        d1_start, d1_end = d1_end, d1_start
+    if d2_start > d2_end:
+        d2_start, d2_end = d2_end, d2_start
+
+    return (d1_start <= d2_end) and (d2_start <= d1_end)
+
+
+
 def _norm_spaces(s):
     return re.sub(r"\s+", " ", (s or "")).strip()
 
@@ -327,15 +382,25 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         for j in range(i + 1, len(base_names)):
             b1 = base_names[i]
             b2 = base_names[j]
-            eq_hit = sorted(bases_data[b1]["eq"].intersection(bases_data[b2]["eq"]))
-            al_hit = sorted(bases_data[b1]["al"].intersection(bases_data[b2]["al"]))
+            b1_data = bases_data[b1]
+            b2_data = bases_data[b2]
+
+            # Valida se as datas das duas manobras do lote se sobrepõem
+            if not _datas_sobrepoem(b1_data.get("b_ini"), b1_data.get("b_fim"), b2_data.get("b_ini"), b2_data.get("b_fim")):
+                log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] {b1} ({b1_data.get('b_ini') or 'N/A'}) e {b2} ({b2_data.get('b_ini') or 'N/A'}): Datas distintas, descartado conflito interno.")
+                continue
+
+            eq_hit = sorted(b1_data["eq"].intersection(b2_data["eq"]))
+            al_hit = sorted(b1_data["al"].intersection(b2_data["al"]))
             if eq_hit or al_hit:
-                log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-INTERNO] {b1} vs {b2} possuem itens em comum!")
+                log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-INTERNO] {b1} vs {b2} possuem itens em comum e datas coincidentes!")
                 conflitos_internos.append({
                     "origem": b1,
                     "destino": b2,
                     "equipamentos": eq_hit,
-                    "alimentadores": al_hit
+                    "alimentadores": al_hit,
+                    "data_origem": b1_data.get("b_ini") or "NÃO DEFINIDO",
+                    "data_destino": b2_data.get("b_ini") or "NÃO DEFINIDO"
                 })
 
     situacoes = _normalize_situacoes(situacoes) if situacoes is not None else _parse_situacoes_env()
@@ -408,7 +473,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         item_started_at = time.perf_counter()
         m_malha = malhas_por_manobra.get(numero, "")
         try:
-            eq, al, vs, _, _ = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, numero, malha=m_malha, data_inicio=data_inicio, data_fim=data_fim)
+            eq, al, vs, m_ini, m_fim = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, numero, malha=m_malha, data_inicio=data_inicio, data_fim=data_fim)
             eq, al = _normalize_sets(eq, al)
         except Exception as e:
             falhas.append({
@@ -417,6 +482,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 "situacoes": sorted(situacoes_por_manobra.get(numero) or []),
             })
             eq, al = set(), set()
+            m_ini, m_fim = None, None
 
         eq_hit_total = sorted(beq_total.intersection(eq)) if beq_total else []
         al_hit_total = sorted(bal_total.intersection(al)) if bal_total else []
@@ -426,14 +492,20 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
             for m_base, b_data in bases_data.items():
                 m_beq = b_data["eq"]
                 m_bal = b_data["al"]
-                
+                b_ini_base = b_data.get("b_ini")
+                b_fim_base = b_data.get("b_fim")
+
+                # Valida se a manobra do GDIS (numero) tem sobreposição de datas com esta manobra base
+                if not _datas_sobrepoem(b_ini_base, b_fim_base, m_ini, m_fim):
+                    continue
+
                 eq_hit = sorted(m_beq.intersection(eq)) if m_beq else []
                 al_hit = sorted(m_bal.intersection(al)) if m_bal else []
 
                 if eq_hit or al_hit:
                     tipo_conflito = "DIRETO_EQUIPAMENTO" if eq_hit else "ALIMENTADOR_COMPARTILHADO"
                     detalhes_topo = []
-                    
+
                     # Análise Topológica Elétrica com NetworkX quando houver alimentador em comum
                     if al_hit and m_beq and eq:
                         nos = [{"id": e, "numeq": e, "POSOPE": "F"} for e in m_beq.union(eq)]
@@ -447,10 +519,11 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                         elif not eq_hit:
                             tipo_conflito = "ALIMENTADOR_RAMAL_ISOLADO"
 
-                    log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-{tipo_conflito}] Manobra {numero} conflita com Manobra Base {m_base}!")
+                    log_func(f"[{time.strftime('%H:%M:%S')}] [CONFLITO-{tipo_conflito}] Manobra {numero} ({m_ini or 'sem data'}) conflita com Manobra Base {m_base} ({b_ini_base or 'sem data'})!")
                     conflitos.append({
                         "base_origem": m_base,
                         "manobra": numero,
+                        "data_manobra": m_ini or "NÃO DEFINIDO",
                         "equipamentos": eq_hit,
                         "alimentadores": al_hit,
                         "situacoes": sorted(situacoes_por_manobra.get(numero) or []),
@@ -490,15 +563,19 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         # Anexa conflitos internos do lote pertencentes a esta manobra base
         for ci in conflitos_internos:
             other_m = None
+            other_d = None
             if ci["origem"] == m_base:
                 other_m = ci["destino"]
+                other_d = ci.get("data_destino")
             elif ci["destino"] == m_base:
                 other_m = ci["origem"]
+                other_d = ci.get("data_origem")
 
             if other_m:
                 c_list.append({
                     "base_origem": m_base,
                     "manobra": other_m,
+                    "data_manobra": other_d or "NÃO DEFINIDO",
                     "equipamentos": ci["equipamentos"],
                     "alimentadores": ci["alimentadores"],
                     "situacoes": ["LOTE_INTERNO"],
@@ -508,6 +585,8 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
 
         resultado_por_base[m_base] = {
             "manobra": m_base,
+            "data_inicio": b_data.get("b_ini") or "",
+            "data_fim": b_data.get("b_fim") or "",
             "equipamentos": sorted(b_data.get("eq") or []),
             "alimentadores": sorted(b_data.get("al") or []),
             "conflitos": c_list,

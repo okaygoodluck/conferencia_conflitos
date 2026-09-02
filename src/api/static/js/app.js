@@ -766,7 +766,13 @@ function showConfResults(data) {
     const conflitosInternos = data.conflitos_internos || [];
     const conflitosGlobais = data.conflitos || [];
     const resultadoPorBase = data.resultado_por_base || {};
-    const baseKeys = Object.keys(resultadoPorBase);
+    
+    // Ordena as sanfonas de manobras base por data de início
+    const baseKeys = Object.keys(resultadoPorBase).sort((a, b) => {
+        const da = resultadoPorBase[a].data_inicio || '';
+        const db = resultadoPorBase[b].data_inicio || '';
+        return da.localeCompare(db);
+    });
 
     // Calcula total global de conflitos somando os conflitos das bases
     let totalConflicts = conflitosGlobais.length;
@@ -843,6 +849,7 @@ function showConfResults(data) {
                         <thead>
                             <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-muted);">
                                 <th style="padding: 8px 10px;">Manobra Conflitante</th>
+                                <th style="padding: 8px 10px;">Data</th>
                                 <th style="padding: 8px 10px;">Situação</th>
                                 <th style="padding: 8px 10px;">Tipo Conflito</th>
                                 <th style="padding: 8px 10px;">Equipamentos</th>
@@ -863,6 +870,7 @@ function showConfResults(data) {
                                 return `
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                                     <td style="padding: 8px 10px;"><b>${c.manobra}</b></td>
+                                    <td style="padding: 8px 10px;"><span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">📅 ${c.data_manobra || info.data_inicio || '-'}</span></td>
                                     <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${sitBg}; color: ${sitColor}; border-radius: 4px; font-weight: 600;">${sitLabel}</span></td>
                                     <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${typeBg}; color: ${typeColor}; border-radius: 4px; font-weight: 600;">${typeLabel}</span></td>
                                     <td style="padding: 8px 10px;">${(c.equipamentos || []).join('; ') || '-'}</td>
@@ -879,6 +887,7 @@ function showConfResults(data) {
 
             const eqptStr = (info.equipamentos || []).join(', ') || 'Nenhum';
             const alimStr = (info.alimentadores || []).join(', ') || 'Nenhum';
+            const dateBadge = info.data_inicio ? `<span style="font-size: 11px; font-weight: 600; padding: 2px 8px; background: rgba(255,255,255,0.06); border-radius: 4px; color: var(--text-muted); border: 1px solid var(--border);">📅 ${info.data_inicio}</span>` : '';
 
             accordionHtml += `
                 <div class="manobra-accordion-item" style="border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; background: rgba(255,255,255,0.02);">
@@ -886,6 +895,7 @@ function showConfResults(data) {
                         <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; color: var(--text-bright);">
                             <i data-lucide="layers" style="width: 18px; height: 18px; color: var(--primary);"></i>
                             <span>Manobra Base ${mBase}</span>
+                            ${dateBadge}
                         </div>
                         <div style="display: flex; align-items: center; gap: 12px;">
                             ${badgeHtml}
@@ -894,6 +904,7 @@ function showConfResults(data) {
                     </div>
                     <div id="conf-acc-body-${mBase}" style="padding: 16px 20px; display: ${displayStyle}; border-top: 1px solid var(--border);">
                         <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 16px; background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px;">
+                            <span>📅 Período Base: <b>${info.data_inicio || 'N/A'}${info.data_fim && info.data_fim !== info.data_inicio ? ' até ' + info.data_fim : ''}</b></span>
                             <span>🔧 Equipamentos: <b>${eqptStr}</b></span>
                             <span>⚡ Alimentadores: <b>${alimStr}</b></span>
                         </div>
