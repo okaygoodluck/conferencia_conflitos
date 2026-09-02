@@ -593,6 +593,13 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             print(f">>> MANOBRA_START: {manobra_num} ({idx_m}/{total_manobras})")
             print("="*80)
             try:
+                # Garante que o navegador esteja na página inicial limpa do GDIS para evitar conflitos de DOM entre manobras
+                try:
+                    page.goto(URL_LOGIN)
+                    page.wait_for_selector("text=Consultas", timeout=15000)
+                except Exception as e_nav:
+                    print(f"    [AVISO] Falha ao resetar navegação para a página inicial: {e_nav}")
+
                 # ============================================================
                 # ETAPA A: EXTRAIR MANOBRA
                 # ============================================================
@@ -612,8 +619,13 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 }""")
 
                 page.click("input[id='formPesquisa:j_id109']") # Botão pesquisar
-                page.wait_for_selector("table[id*='resulPesManobra']", timeout=15000)
-                page.wait_for_timeout(2000)
+                
+                # Aguarda especificamente até que a tabela traga o link contendo o número da manobra pesquisada
+                try:
+                    page.wait_for_selector(f"table[id*='resulPesManobra'] a:has-text('{manobra_num}')", timeout=15000)
+                except Exception:
+                    page.wait_for_selector("table[id*='resulPesManobra']", timeout=15000)
+                    page.wait_for_timeout(2000)
 
                 # Pega a Solicitação Vinculada na tabela
                 print("    Buscando número da Solicitação...")
@@ -643,16 +655,23 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 }}""", manobra_num)
 
                 if not solicitacao_num:
-                    print("    [ERRO] Não achei o número da Solicitação vinculada. Verifique a manobra informada.")
-                    return
+                    raise RuntimeError(f"Não foi possível encontrar o número da Solicitação vinculada à manobra {manobra_num}.")
 
                 # Abre o detalhe da manobra
                 print(f"    Abrindo detalhes da Manobra {manobra_num}...")
-                page.evaluate(f"""(num) => {{
+                link_clicked = page.evaluate(f"""(num) => {{
                     const links = Array.from(document.querySelectorAll("table[id*='resulPesManobra'] a"));
                     const link = links.find(l => (l.innerText || '').includes(String(num)));
-                    if (link) link.click();
+                    if (link) {{
+                        link.click();
+                        return true;
+                    }}
+                    return false;
                 }}""", manobra_num)
+
+                if not link_clicked:
+                    raise RuntimeError(f"Link para a manobra {manobra_num} não foi encontrado na tabela de resultados da pesquisa.")
+
                 page.wait_for_selector("div[id*='etapasManobraSimplePanelId']", timeout=25000)
         
                 # Extrai metadados do cabeçalho da Manobra (Título/Finalidade)
