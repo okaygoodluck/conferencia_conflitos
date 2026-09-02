@@ -54,10 +54,15 @@ def _cleanup_expired_jobs():
     if expired:
         _log(f"[INFO] Limpeza de {len(expired)} job(s) expirado(s).")
 
-def _run_conferidor(job_id, manobra, user, passwd):
+def _run_conferidor(job_id, manobras_lista, user, passwd):
     capture = io.StringIO()
     with STATE_LOCK:
-        STATE[job_id] = {"state": "running", "capture": capture}
+        STATE[job_id] = {
+            "state": "running", 
+            "capture": capture,
+            "manobras": manobras_lista,
+            "total": len(manobras_lista)
+        }
 
     def thread_log(*args, **kwargs):
         print(*args, file=capture, **kwargs)
@@ -71,7 +76,7 @@ def _run_conferidor(job_id, manobra, user, passwd):
             eq_cache = CACHE["equipamentos"]
 
         conferidor_manobras.main(
-            manobra_param=manobra,
+            manobra_param=manobras_lista,
             usuario_param=user,
             senha_param=passwd,
             headless=True,
@@ -124,7 +129,9 @@ class Handler(BaseHTTPRequestHandler):
             resp = {
                 "state": st.get("state"),
                 "log": capture_obj.getvalue() if capture_obj else "",
-                "error": st.get("error", "")
+                "error": st.get("error", ""),
+                "manobras": st.get("manobras", []),
+                "total": st.get("total", 0)
             }
             return self._send_json(HTTPStatus.OK, resp)
 
@@ -138,21 +145,23 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
 
         if u.path == "/start":
-            # A-02: Validação de entrada obrigatória
-            manobra = (body.get("manobra") or "").strip()
+            # A-02: Validação de entrada obrigatória (suporta 1 ou múltiplas manobras em texto)
+            manobra_raw = str(body.get("manobra") or "").strip()
             usuario = (body.get("usuario") or "").strip()
             senha = (body.get("senha") or "").strip()
 
-            if not manobra:
-                return self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Campo 'manobra' é obrigatório."})
+            manobras_lista = list(dict.fromkeys(re.findall(r'\b\d{6,10}\b', manobra_raw)))
+
+            if not manobras_lista:
+                return self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Nenhum número de manobra válido informado."})
             if not usuario or not senha:
                 return self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Credenciais de usuário são obrigatórias."})
 
             job_id = str(uuid.uuid4())
             with STATE_LOCK:
-                STATE[job_id] = {"state": "igniting"}
-            threading.Thread(target=_run_conferidor, args=(job_id, manobra, usuario, senha), daemon=True).start()
-            return self._send_json(HTTPStatus.OK, {"job_id": job_id})
+                STATE[job_id] = {"state": "igniting", "manobras": manobras_lista, "total": len(manobras_lista)}
+            threading.Thread(target=_run_conferidor, args=(job_id, manobras_lista, usuario, senha), daemon=True).start()
+            return self._send_json(HTTPStatus.OK, {"job_id": job_id, "total": len(manobras_lista)})
 
         self.send_response(HTTPStatus.NOT_FOUND)
         self.end_headers()

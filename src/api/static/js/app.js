@@ -931,24 +931,55 @@ function stripAnsi(text) {
     return text.replace(/[\u001b\x1b]\[[0-9;]*[a-zA-Z]/g, '').trim();
 }
 
-function renderConferidorResults(log, jobDone = true) {
-    // M-01: Remove o skeleton baseado no estado real do job, não no tamanho do log
-    if (jobDone) {
-        document.getElementById('cm-skeleton').classList.remove('active');
-        document.getElementById('cm-report-content').style.display = 'block';
-    } else if (log.length > 50) {
-        // Fallback: exibe conteúdo parcial se houver dado suficiente
-        document.getElementById('cm-skeleton').classList.remove('active');
-        document.getElementById('cm-report-content').style.display = 'block';
+function parseMultiManobraLog(log) {
+    const blocks = [];
+    const lines = log.split('\n');
+    let currentManobra = null;
+    let currentLogLines = [];
+
+    lines.forEach(line => {
+        const rawLine = line.trim();
+        const clean = stripAnsi(rawLine);
+
+        const startMatch = clean.match(/>>> MANOBRA_START:\s*(\d+)/i);
+        const endMatch = clean.match(/>>> MANOBRA_END:\s*(\d+)/i);
+
+        if (startMatch) {
+            if (currentManobra && currentLogLines.length > 0) {
+                blocks.push({ manobra: currentManobra, log: currentLogLines.join('\n') });
+            }
+            currentManobra = startMatch[1];
+            currentLogLines = [];
+        } else if (endMatch) {
+            if (currentManobra) {
+                blocks.push({ manobra: currentManobra, log: currentLogLines.join('\n') });
+                currentManobra = null;
+                currentLogLines = [];
+            }
+        } else if (currentManobra) {
+            currentLogLines.push(line);
+        }
+    });
+
+    if (currentManobra && currentLogLines.length > 0) {
+        blocks.push({ manobra: currentManobra, log: currentLogLines.join('\n') });
     }
 
-    const content = document.getElementById('cm-report-content');
-    const dash = document.getElementById('cm-summary-dash');
-    const lines = log.split('\n');
+    if (blocks.length === 0 && log.trim().length > 0) {
+        const manobraMatch = log.match(/Manobra\s+(\d{6,10})/i);
+        const inputVal = (document.getElementById('cm-manobra')?.value || cmCurrentManobra || '').trim();
+        const mNum = manobraMatch ? manobraMatch[1] : (inputVal || 'SOLICITADA');
+        blocks.push({ manobra: mNum, log: log });
+    }
 
-    let cardsHtml = '';
+    return blocks;
+}
+
+function analyzeManobraBlock(block) {
+    const lines = block.log.split('\n');
     let currentPhase = null;
     let ruleItems = [];
+    let cardsHtml = '';
     let stats = { ok: 0, fail: 0, warn: 0 };
 
     lines.forEach(line => {
@@ -998,90 +1029,159 @@ function renderConferidorResults(log, jobDone = true) {
         cardsHtml += buildPhaseCard(currentPhase, ruleItems);
     }
 
-    const manobraInputVal = (document.getElementById('cm-manobra')?.value || cmCurrentManobra || '').trim();
-    const manobraCode = manobraInputVal ? manobraInputVal : 'SOLICITADA';
+    const hasProcessingError = block.log.toLowerCase().includes('erro') || block.log.toLowerCase().includes('falha');
 
-    let bannerHtml = '';
-    let cmOpMessage = '';
+    return {
+        manobra: block.manobra,
+        stats,
+        cardsHtml,
+        hasProcessingError,
+        rawLog: block.log
+    };
+}
 
-    const hasErrorInLog = log.toLowerCase().includes('erro') || log.toLowerCase().includes('falha') || log.toLowerCase().includes('exceção');
+function renderConferidorResults(log, jobDone = true) {
+    if (jobDone) {
+        document.getElementById('cm-skeleton').classList.remove('active');
+        document.getElementById('cm-report-content').style.display = 'block';
+    } else if (log.length > 50) {
+        document.getElementById('cm-skeleton').classList.remove('active');
+        document.getElementById('cm-report-content').style.display = 'block';
+    }
 
-    if (stats.ok > 0 && stats.fail === 0 && stats.warn === 0) {
-        cmOpMessage = `MANOBRA ${manobraCode} FOI CONFERIDA, ESTÁ TUDO OK, MAS NÃO ESQUEÇA DE FAZER SUA VERIFICAÇÃO!`;
-        bannerHtml = `
-            <div class="alert-banner success-banner" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
-                <div style="font-size: 26px;">✅</div>
-                <div>
-                    <div style="font-size: 15px; font-weight: 700; color: var(--accent);">
-                        ${cmOpMessage}
-                    </div>
-                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                        Nenhuma divergência ou alerta foi identificado nas regras automáticas.
-                    </div>
-                </div>
-            </div>
+    const content = document.getElementById('cm-report-content');
+    const dash = document.getElementById('cm-summary-dash');
+    
+    const blocks = parseMultiManobraLog(log);
+    const analyzedList = blocks.map(analyzeManobraBlock);
+
+    let totalOk = 0;
+    let totalFail = 0;
+    let totalWarn = 0;
+
+    analyzedList.forEach(item => {
+        totalOk += item.stats.ok;
+        totalFail += item.stats.fail;
+        totalWarn += item.stats.warn;
+    });
+
+    if (dash) {
+        dash.innerHTML = `
+            <div class="summary-stat"><span class="stat-val" style="color:var(--primary)">${analyzedList.length}</span><span class="stat-label">Lote Total</span></div>
+            <div class="summary-stat"><span class="stat-val" style="color:var(--accent)">${totalOk}</span><span class="stat-label">Regras OK</span></div>
+            <div class="summary-stat"><span class="stat-val" style="color:var(--danger)">${totalFail}</span><span class="stat-label">Divergências</span></div>
+            <div class="summary-stat"><span class="stat-val" style="color:var(--warn)">${totalWarn}</span><span class="stat-label">Alertas</span></div>
         `;
-    } else if (stats.fail === 0 && stats.warn === 0 && stats.ok === 0) {
-        if (hasErrorInLog) {
-            cmOpMessage = `ERRO NA CONFERÊNCIA DA MANOBRA ${manobraCode}`;
+    }
+
+    let accordionHtml = '';
+
+    analyzedList.forEach((item, idx) => {
+        const { manobra, stats, cardsHtml, hasProcessingError } = item;
+        let badgeHtml = '';
+        let bannerHtml = '';
+
+        if (stats.ok > 0 && stats.fail === 0 && stats.warn === 0) {
+            badgeHtml = `<span style="background: rgba(16, 185, 129, 0.15); color: var(--accent); border: 1px solid rgba(16, 185, 129, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">✅ OK</span>`;
             bannerHtml = `
-                <div class="alert-banner warning-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
-                    <div style="font-size: 26px;">❌</div>
+                <div class="alert-banner success-banner" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+                    <div style="font-size: 22px;">✅</div>
                     <div>
-                        <div style="font-size: 15px; font-weight: 700; color: var(--danger);">
-                            ${cmOpMessage}
+                        <div style="font-size: 14px; font-weight: 700; color: var(--accent);">
+                            MANOBRA ${manobra} CONFERIDA COM SUCESSO!
                         </div>
-                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                            Ocorreu um erro durante a execução ou extração de dados. Verifique o console de log.
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                            Nenhuma divergência foi identificada nas regras automáticas.
                         </div>
                     </div>
                 </div>
             `;
-        } else {
-            cmOpMessage = `PROCESSANDO OU NENHUMA REGRA EXECUTADA PARA A MANOBRA ${manobraCode}`;
-            bannerHtml = `
-                <div class="alert-banner warning-banner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
-                    <div style="font-size: 26px;">ℹ️</div>
-                    <div>
-                        <div style="font-size: 15px; font-weight: 700; color: var(--warn);">
-                            ${cmOpMessage}
+        } else if (stats.fail === 0 && stats.warn === 0 && stats.ok === 0) {
+            if (hasProcessingError) {
+                badgeHtml = `<span style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">❌ ERRO PROCESSAMENTO</span>`;
+                bannerHtml = `
+                    <div class="alert-banner warning-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+                        <div style="font-size: 22px;">❌</div>
+                        <div>
+                            <div style="font-size: 14px; font-weight: 700; color: var(--danger);">
+                                FALHA NO PROCESSAMENTO DA MANOBRA ${manobra}
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                                Ocorreu uma exceção durante a execução. Consulte o console de logs.
+                            </div>
                         </div>
-                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                            Aguarde a conclusão da conferência para visualizar os resultados detalhados.
+                    </div>
+                `;
+            } else {
+                badgeHtml = `<span style="background: rgba(245, 158, 11, 0.15); color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">⏳ PROCESSANDO</span>`;
+                bannerHtml = `
+                    <div class="alert-banner warning-banner" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+                        <div style="font-size: 22px;">ℹ️</div>
+                        <div>
+                            <div style="font-size: 14px; font-weight: 700; color: var(--warn);">
+                                PROCESSANDO MANOBRA ${manobra}...
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            badgeHtml = `<span style="background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;">⚠️ ${stats.fail} DIVERGÊNCIA(S)</span>`;
+            bannerHtml = `
+                <div class="alert-banner warning-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+                    <div style="font-size: 22px;">⚠️</div>
+                    <div>
+                        <div style="font-size: 14px; font-weight: 700; color: var(--danger);">
+                            MANOBRA ${manobra}: ${stats.fail} DIVERGÊNCIA(S) IDENTIFICADA(S)
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                            ${stats.fail} erro(s) e ${stats.warn} alerta(s). Detalhes abaixo:
                         </div>
                     </div>
                 </div>
             `;
         }
-    } else {
-        cmOpMessage = `MANOBRA ${manobraCode} FOI CONFERIDA, PORÉM FOI IDENTIFICADO ESSA(S) DIVERGÊNCIA(S):`;
-        bannerHtml = `
-            <div class="alert-banner warning-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 14px;">
-                <div style="font-size: 26px;">⚠️</div>
-                <div>
-                    <div style="font-size: 15px; font-weight: 700; color: var(--danger);">
-                        ${cmOpMessage}
+
+        const isCollapsed = (analyzedList.length > 1) && (stats.fail === 0 && stats.warn === 0 && !hasProcessingError && idx > 0);
+        const displayStyle = isCollapsed ? 'none' : 'block';
+
+        accordionHtml += `
+            <div class="manobra-accordion-item" style="border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; background: rgba(255,255,255,0.02);">
+                <div class="accordion-header" onclick="window.toggleManobraAccordion('${manobra}')" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: rgba(255,255,255,0.04); cursor: pointer; user-select: none;">
+                    <div style="display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; color: var(--text-bright);">
+                        <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--primary);"></i>
+                        <span>Manobra ${manobra}</span>
                     </div>
-                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                        Apontado(s) ${stats.fail} erro(s)/falha(s) e ${stats.warn} alerta(s). Detalhes abaixo:
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        ${badgeHtml}
+                        <i data-lucide="chevron-down" id="acc-icon-${manobra}" style="width: 18px; height: 18px; transition: transform 0.2s; ${isCollapsed ? '' : 'transform: rotate(180deg);'}"></i>
                     </div>
+                </div>
+                <div id="acc-body-${manobra}" style="padding: 16px 20px; display: ${displayStyle}; border-top: 1px solid var(--border);">
+                    ${bannerHtml}
+                    ${cardsHtml}
                 </div>
             </div>
         `;
-    }
+    });
 
-    content.innerHTML = bannerHtml + cardsHtml;
+    content.innerHTML = accordionHtml;
 
     if (window.lucide) lucide.createIcons();
-
-    if (dash) {
-        dash.innerHTML = `
-            <div class="summary-stat"><span class="stat-val" style="color:var(--accent)">${stats.ok}</span><span class="stat-label">OK</span></div>
-            <div class="summary-stat"><span class="stat-val" style="color:var(--danger)">${stats.fail}</span><span class="stat-label">Falhas</span></div>
-            <div class="summary-stat"><span class="stat-val" style="color:var(--warn)">${stats.warn}</span><span class="stat-label">Alertas</span></div>
-        `;
-    }
 }
+
+window.toggleManobraAccordion = function(manobra) {
+    const body = document.getElementById(`acc-body-${manobra}`);
+    const icon = document.getElementById(`acc-icon-${manobra}`);
+    if (!body) return;
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        if (icon) icon.style.transform = 'rotate(180deg)';
+    } else {
+        body.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+    }
+};
 
 function buildPhaseCard(title, items) {
     if (items.length === 0) return '';

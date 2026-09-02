@@ -217,14 +217,18 @@
                         <form id="form-conferidor_manobras">
                             <div class="grid">
                                 <div class="field col-12">
-                                    <label>Manobra Base</label>
-                                    <input type="text" id="cm-manobra" required
-                                        placeholder="Digite o número da manobra">
+                                    <label style="display: flex; align-items: center; justify-content: space-between;">
+                                        <span>Manobras (Uma ou mais manobras)</span>
+                                        <span style="font-size: 11px; color: var(--text-muted); font-weight: normal;">Separe por vírgula, espaço ou quebra de linha</span>
+                                    </label>
+                                    <textarea id="cm-manobra" required rows="3"
+                                        placeholder="Digite ou cole os números das manobras. Ex: 245588790, 245537587, 245041831"
+                                        style="font-family: inherit; font-size: 13px; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-main); width: 100%; resize: vertical; outline: none;"></textarea>
                                 </div>
                             </div>
-                            <div style="margin-top: 24px;">
+                            <div style="margin-top: 16px;">
                                 <button type="submit" id="btn-cm-start" class="btn btn-primary">
-                                    <i data-lucide="search"></i> Conferir Manobra
+                                    <i data-lucide="search"></i> Conferir Manobra(s)
                                 </button>
                             </div>
                         </form>
