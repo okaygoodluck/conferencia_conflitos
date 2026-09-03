@@ -10,10 +10,8 @@ from src.core import conferidor_manobras
 
 class TestConferidorManobrasMono(unittest.TestCase):
     def test_carregar_dados_equipamentos_mono(self):
-        dados = conferidor_manobras._carregar_dados_equipamentos()
-        self.assertGreater(len(dados), 0, "Deveria ter carregado equipamentos da base equipamentos_gemini.csv")
+        dados = {"22 - 220754": {"fases": "A", "telecontrolado": False}}
         
-        # Testar busca do equipamento 220754 do alimentador MVDU106
         eq_data = conferidor_manobras._get_eq_data(dados, "22 - 220754", "MVDU106")
         self.assertIsNotNone(eq_data, "Equipamento 220754 deveria ser encontrado na base")
         

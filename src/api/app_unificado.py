@@ -35,11 +35,16 @@ DEFAULT_ADMIN_PASSWORD = "cemig@2026"
 ACTIVE_ADMIN_TOKENS = set()
 
 def get_admin_password():
+    env_pwd = (os.getenv("GDIS_ADMIN_PASSWORD") or "").strip()
+    if env_pwd:
+        return env_pwd
     if os.path.exists(CONFIG_ADMIN_PATH):
         try:
             with open(CONFIG_ADMIN_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("admin_password", DEFAULT_ADMIN_PASSWORD)
+                val = (data.get("admin_password") or "").strip()
+                if val:
+                    return val
         except Exception:
             pass
     return DEFAULT_ADMIN_PASSWORD
@@ -339,6 +344,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.wfile.write(f"Erro no Proxy: {e}".encode())
                 return
 
+    @staticmethod
+    def _is_safe_path(base_dir, target_path):
+        try:
+            base_dir = os.path.abspath(base_dir)
+            target = os.path.abspath(target_path)
+            return os.path.commonpath([base_dir, target]) == base_dir and os.path.exists(target) and os.path.isfile(target)
+        except Exception:
+            return False
+
     def do_GET(self):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
@@ -352,20 +366,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return self._send_file(ui_path, "text/html; charset=utf-8")
         
         if u.path.startswith("/assets/"):
-            name = u.path.split("/")[-1]
-            ext = name.split(".")[-1].lower()
+            rel_name = u.path[len("/assets/"):].lstrip("/\\")
+            base_assets = os.path.abspath(os.path.join(_app_dir(), "assets"))
+            path = os.path.abspath(os.path.join(base_assets, rel_name))
+            if not self._is_safe_path(base_assets, path):
+                self.send_response(HTTPStatus.NOT_FOUND)
+                self.end_headers()
+                return
+            ext = path.split(".")[-1].lower()
             ct = "image/x-icon" if ext == "ico" else "image/png"
-            path = os.path.join(_app_dir(), "assets", name)
             return self._send_file(path, ct)
 
-        # Arquivos Estáticos (CSS/JS)
+        # Arquivos Estáticos (CSS/JS) com proteção contra Path Traversal
         if u.path.startswith("/static/"):
-            rel_path = u.path[len("/static/"):]
-            path = os.path.join(os.path.dirname(__file__), "static", rel_path.replace("/", os.sep))
+            rel_path = u.path[len("/static/"):].lstrip("/\\")
+            base_static = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
+            path = os.path.abspath(os.path.join(base_static, rel_path.replace("/", os.sep)))
+            if not self._is_safe_path(base_static, path):
+                self.send_response(HTTPStatus.NOT_FOUND)
+                self.end_headers()
+                return
             ext = path.split(".")[-1].lower()
             ct = "text/plain"
             if ext == "css": ct = "text/css"
             elif ext == "js": ct = "application/javascript"
+            elif ext in ("png", "jpg", "jpeg", "svg", "ico"): ct = f"image/{ext}"
             return self._send_file(path, ct)
 
         # API Terminal & Processos (Internal Hub)
@@ -467,15 +492,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
             service = data.get("service", "all")
             process_manager.clear_logs(service)
             return self._send_json({"success": True, "service": service})
-
-        # Rotas Legacy de Restart
-        if u.path == "/hub/restart_conflitos":
-            process_manager.restart_service("conflitos")
-            return self._send_json({"status": "starting"})
-
-        if u.path == "/hub/restart_conferidor":
-            process_manager.restart_service("conferidor_manobras")
-            return self._send_json({"status": "starting"})
 
         # Roteamento Conflitos
         if u.path.startswith("/conflitos/"):

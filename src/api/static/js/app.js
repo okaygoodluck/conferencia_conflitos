@@ -56,6 +56,16 @@ function showToast(msg) {
     setTimeout(() => { toast.style.opacity = '0'; }, 2500);
 }
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // --- GERENCIADOR DE AUTENTICAÇÃO DE ADMIN ---
 let adminToken = sessionStorage.getItem('gdis_admin_token') || null;
 
@@ -211,35 +221,31 @@ function showSection(id, btn) {
     document.getElementById('current-page-title').textContent = titles[id] || 'Dashboard';
 }
 
-// Sincronização e Persistência de User/Pass por 10 Horas
-const GDIS_CREDS_EXPIRY_MS = 10 * 60 * 60 * 1000;
-
+// Sincronização e Proteção de Credenciais (Sessão Ativa / SessionStorage)
 function setupCredentialSync() {
-    // 1. Restaurar credenciais salvas caso estejam dentro do limite de 10 horas
-    const expiry = localStorage.getItem('gdis_creds_expiry');
-    if (expiry && Date.now() < parseInt(expiry, 10)) {
-        const savedUser = localStorage.getItem('gdis_user') || '';
-        const savedPass = localStorage.getItem('gdis_pass') || '';
-        document.querySelectorAll('.shared-user').forEach(x => { x.value = savedUser; });
-        document.querySelectorAll('.shared-pass').forEach(x => { x.value = savedPass; });
-    } else {
+    // Limpeza profilática de senhas antigas gravadas no localStorage
+    try {
         localStorage.removeItem('gdis_user');
         localStorage.removeItem('gdis_pass');
         localStorage.removeItem('gdis_creds_expiry');
-    }
+    } catch (e) {}
+
+    // Restaura credenciais da sessão atual
+    const savedUser = sessionStorage.getItem('gdis_user') || '';
+    const savedPass = sessionStorage.getItem('gdis_pass') || '';
+    if (savedUser) document.querySelectorAll('.shared-user').forEach(x => { x.value = savedUser; });
+    if (savedPass) document.querySelectorAll('.shared-pass').forEach(x => { x.value = savedPass; });
 
     function saveCredentials() {
         const userVal = document.querySelector('.shared-user')?.value || '';
         const passVal = document.querySelector('.shared-pass')?.value || '';
         
         if (userVal || passVal) {
-            localStorage.setItem('gdis_user', userVal);
-            localStorage.setItem('gdis_pass', passVal);
-            localStorage.setItem('gdis_creds_expiry', (Date.now() + GDIS_CREDS_EXPIRY_MS).toString());
+            sessionStorage.setItem('gdis_user', userVal);
+            sessionStorage.setItem('gdis_pass', passVal);
         } else {
-            localStorage.removeItem('gdis_user');
-            localStorage.removeItem('gdis_pass');
-            localStorage.removeItem('gdis_creds_expiry');
+            sessionStorage.removeItem('gdis_user');
+            sessionStorage.removeItem('gdis_pass');
         }
     }
 
@@ -926,7 +932,11 @@ function showConfResults(data) {
         conflitosInternos.forEach(c => {
             const tr = document.createElement('tr');
             tr.style.background = 'rgba(245, 158, 11, 0.05)';
-            tr.innerHTML = `<td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td>${c.origem} vs ${c.destino}</td><td>${(c.equipamentos || []).join('; ')}</td><td>${(c.alimentadores || []).join('; ')}</td>`;
+            const orig = escapeHtml(c.origem);
+            const dest = escapeHtml(c.destino);
+            const eq = escapeHtml((c.equipamentos || []).join('; '));
+            const al = escapeHtml((c.alimentadores || []).join('; '));
+            tr.innerHTML = `<td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td>${orig} vs ${dest}</td><td>${eq}</td><td>${al}</td>`;
             tbody.appendChild(tr);
         });
     }
@@ -934,7 +944,11 @@ function showConfResults(data) {
     if (conflitosGlobais.length > 0) {
         conflitosGlobais.forEach(c => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td><b>${c.manobra}</b></td><td>${(c.situacoes || []).join(', ')}</td><td>${(c.equipamentos || []).join('; ')}</td><td>${(c.alimentadores || []).join('; ')}</td>`;
+            const man = escapeHtml(c.manobra);
+            const sit = escapeHtml((c.situacoes || []).join(', '));
+            const eq = escapeHtml((c.equipamentos || []).join('; '));
+            const al = escapeHtml((c.alimentadores || []).join('; '));
+            tr.innerHTML = `<td><b>${man}</b></td><td>${sit}</td><td>${eq}</td><td>${al}</td>`;
             tbody.appendChild(tr);
         });
     }

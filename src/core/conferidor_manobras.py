@@ -1,8 +1,8 @@
 import os
 import re
 import getpass
-import threading
-import csv
+import time
+import json
 from playwright.sync_api import sync_playwright
 
 class Colors:
@@ -29,58 +29,9 @@ def print_regra(regra_id, nivel, mensagem, log_func=print):
     else:
         log_func(f"   {prefixos.get(nivel, '')} {mensagem}")
 
-# Trava global para evitar que múltiplas threads escrevam no arquivo de cache simultaneamente
-_CACHE_LOCK = threading.Lock()
-
 URL_LOGIN = "http://gdis-pm/gdispm/"
 
-"""
-REGRAS DO CONFERIDOR DE MANOBRAS IMPLEMENTADAS (1 a 44):
-01. Equipamento da Solicitação presente na Manobra
-02. Ação Inicial (Abrir/Sinalizar) para equipamentos da Solicitação
-03. Alimentador (Manobra vs Solicitação)
-04. Local (Manobra vs Solicitação)
-05. Bloqueio de RA (Exigência vs Presença de Macros MA52/MA14/MA28)
-06. Incompatibilidade de Ação pelo Prefixo do Equipamento
-07. Modo Local (MA64) obrigatório para Telecontrolados
-08. Macros exclusivas de Reguladores de Tensão (RT)
-09. Macros de operação de Religador/Disjuntor
-10. Bloqueio/Desbloqueio de Chave Deslocada
-11. Alteração de Ajustes de Proteção (Prefixos permitidos)
-12. Posicionamento (MA30/MA67) p/ Região (Aviso se TERCEIROS)
-13. Abertura sem sinalização pela Região (MA01 sem CORTE DE CARGA)
-14. Posicionamento proibido para o executor COD
-15. COD só opera equipamentos telecontrolados e permitidos
-16. Etapa 'VERIFICACAO PELO COD' exclusiva para o executor COD
-17. Verificação de Anormalidade (MA09) vs By-pass
-18. Comandos de By-pass (Prefixos permitidos)
-19. Macro MAC1 exclusiva para equipamentos físicos (não alimentador)
-20. Observação obrigatória para Troca de Elo e Mudança de TAP
-21. Anti-Placeholder (Evitar textos genéricos como AAA)
-22. Equilíbrio de Ações Inversas e Cronologia de Bloqueios
-23. Uso de Gerador (GMT/GBT declarado na Solicitação/Etapa)
-24. Validações de Cabeçalho (CI, EQUIPES, GMT, etc.)
-25. Horários Repetidos entre Etapas
-26. Datas e Horários coerentes por Equipamento
-27. Coerência do Executor (Supervisor em D/R; COD 'Para Refletir')
-28. Duplicidades de Ação na mesma Etapa
-29. Verificação de Anormalidade por Alimentador
-30. Ordem Cronológica de Ações (Abrir -> Manobrar -> Fechar)
-31. Coerência de POSOPE e Sincronismo Inicial (MA39/MA49)
-32. Compatibilidade de Fases (Trifásico vs Monofásico)
-33. Chave ASTA (MA30) exige indicação 'COM CARGA'
-34. Compatibilidade da macro MAB9 com Prefixo
-35. Validação de Equipes no Cabeçalho vs Executor Região
-36. Sincronismo de Horário entre Itens e Cabeçalho da Etapa
-37. Macro MA60 (Aviso de Telecontrole) exclusiva do COD
-38. Equipamentos Manuais operados pela Região
-39. Posicionamento (Sim) restrito a Abertura/Fechamento pela Região
-40. Aviso de Risco Sistema (Citação de risco no texto)
-41. Macro MA63 (Troca de Elo) exclusiva para executor Região
-42. Sinalização Pré-Desligamento (MA01 deve ter MA06 até o Desligamento)
-43. Executor em Desligamento/Religamento (Supervisor em D/R)
-44. Sequência de Abertura/Fechamento em Manobra com Pique
-"""
+# Motor de Validação das Regras Operacionais de Manobra (SD/ADMS CEMIG)
 
 def _norm_eqpto(s):
     """Normaliza o número do equipamento para garantir que a comparação seja justa (ex: 24-123 vira 24 - 123)"""
@@ -211,11 +162,15 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
         if key_local in dados:
             lista = dados[key_local]
 
-    # 2. TENTA POR NOME COMPLETO (Ex: 22 - 123456)
+    # 2. TENTA POR NÚMERO PURO (Ex: 107457)
+    if not lista and num_only:
+        lista = dados.get(num_only)
+
+    # 3. TENTA POR NOME COMPLETO (Ex: 22 - 123456)
     if not lista:
         lista = dados.get(eq)
     
-    # 3. TENTA POR NÚMERO SEM PREFIXO (Ex: 123456)
+    # 4. TENTA POR NÚMERO SEM PREFIXO (Ex: 123456)
     if not lista and '-' in eq:
         sem_prefixo = eq.split('-', 1)[1].strip()
         lista = dados.get(sem_prefixo)
@@ -287,17 +242,188 @@ def _obter_parametros_conferidor():
         "61": ["MA64","MA65", "MA35","MA36", "MA77", "MAB9"], # CH PROTECAO SUB
     }
 
-def _carregar_dados_equipamentos(log_func=print):
+def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_func=print) -> dict:
     """
-    Desativa a carga da base estática 'equipamentos_gemini.csv' para evitar dados obsoletos/não confiáveis,
-    forçando o sistema a utilizar extração dinâmica em tempo real (GDIS) e análise contextual dos dados.
+    Consulta dinamicamente a topologia ao vivo do alimentador na API do GDIS (getRedeAlimentador).
+    Retorna um dicionário indexado de equipamentos com estado POSOPE, fases, tipo e telecontrole.
     """
-    if callable(log_func):
+    if not cod_alim or cod_alim == '-':
+        return {}
+
+    cod_clean = str(cod_alim).strip().upper()
+    if not callable(log_func):
+        log_func = print
+
+    url_rede = os.environ.get(
+        "GDIS_REDE_URL",
+        "http://gdis-apoio:80/gdis-do-web/services/getRedeAlimentador"
+    )
+
+    # 1. Captura o JSESSIONID e outros cookies da sessão ativa do Playwright
+    jsessionid = None
+    cookie_header_parts = []
+    try:
+        cookies = context.cookies()
+        for cookie in cookies:
+            c_name = cookie.get("name", "")
+            c_val = cookie.get("value", "")
+            c_domain = str(cookie.get("domain", "")).lower()
+            cookie_header_parts.append(f"{c_name}={c_val}")
+            if "JSESSIONID" in c_name.upper():
+                if "apoio" in c_domain or not jsessionid:
+                    jsessionid = c_val
+    except Exception as e_cook:
+        log_func(f"[GDIS Dinâmico] Aviso ao obter cookies da sessão: {e_cook}")
+
+    candidatos = [cod_clean]
+    if ' ' in cod_clean:
+        candidatos.append(cod_clean.replace(' ', ''))
+    else:
+        m = re.match(r'^([A-Z]{3,4})(\d{2,4})$', cod_clean)
+        if m:
+            candidatos.append(f"{m.group(1)} {m.group(2)}")
+
+    dados_json = None
+    for cand in candidatos:
+        payload = {
+            "alim": cand,
+            "ambiente": "operacao",
+            "userName": usuario or "",
+            "salt": str(int(time.time() * 1000))
+        }
+        params = {}
+        if jsessionid:
+            params["sessionId"] = jsessionid
+
+        headers = {
+            "User-Agent": "Jakarta Commons-HttpClient/3.1"
+        }
+
+        log_func(f"[GDIS Dinâmico] Consultando topologia ao vivo para o alimentador '{cand}'...")
+
+        # Tentativa 1: Via context.request do Playwright (compartilha contexto de rede e cookies do browser)
         try:
-            log_func("[INFO] Base estática CSV desativada: priorizando consulta e extração dinâmica em tempo real (GDIS).")
-        except Exception:
-            pass
-    return {}
+            resp = context.request.post(
+                url_rede,
+                params=params,
+                headers=headers,
+                form=payload,
+                timeout=30000
+            )
+            if resp.status == 200:
+                txt_resp = resp.text()
+                if "cookiecheck" not in txt_resp:
+                    try:
+                        cand_json = resp.json()
+                        if isinstance(cand_json, dict) and cand_json.get("nos"):
+                            dados_json = cand_json
+                            cod_clean = cand
+                            break
+                    except Exception:
+                        pass
+                else:
+                    log_func(f"[GDIS Dinâmico] Servidor Apoio solicitou cookiecheck para '{cand}'.")
+            elif resp.status == 204:
+                log_func(f"[GDIS Dinâmico] Alimentador '{cand}' sem rede cadastrada no GDIS Apoio (HTTP 204).")
+            else:
+                log_func(f"[GDIS Dinâmico] HTTP {resp.status} retornado para '{cand}'.")
+        except Exception as e_pw:
+            log_func(f"[GDIS Dinâmico] Tentando fallback HTTP direto para '{cand}': {e_pw}")
+
+        # Tentativa 2: Fallback via urllib caso Playwright request não tenha retornado dados
+        if not dados_json and jsessionid:
+            try:
+                import urllib.request, urllib.parse
+                url_full = url_rede + "?" + urllib.parse.urlencode(params)
+                encoded_body = urllib.parse.urlencode(payload).encode("utf-8")
+                h_urllib = {
+                    "User-Agent": "Jakarta Commons-HttpClient/3.1",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Cookie": "; ".join(cookie_header_parts)
+                }
+                req = urllib.request.Request(url_full, data=encoded_body, headers=h_urllib, method="POST")
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    if r.status == 200:
+                        raw_text = r.read().decode("utf-8", errors="replace")
+                        if "cookiecheck" not in raw_text:
+                            cand_json = json.loads(raw_text)
+                            if isinstance(cand_json, dict) and cand_json.get("nos"):
+                                dados_json = cand_json
+                                cod_clean = cand
+                                break
+                        else:
+                            log_func(f"[GDIS Dinâmico] Servidor Apoio requer autenticação em gdis-apoio.")
+            except Exception as e_url:
+                log_func(f"[GDIS Dinâmico] Fallback HTTP: {e_url}")
+
+        if dados_json and isinstance(dados_json, dict) and dados_json.get("nos"):
+            break
+
+    if not dados_json or not isinstance(dados_json, dict) or "nos" not in dados_json:
+        return {}
+
+    nos = dados_json.get("nos", [])
+    equipamentos = {}
+
+    for no in nos:
+        if not isinstance(no, dict):
+            continue
+        numeq = str(no.get("numeq", "")).strip()
+        if not numeq or numeq == "-":
+            continue
+
+        base_posope = str(no.get("POSOPE", no.get("posope", no.get("estado", "")))).strip().upper()
+        if base_posope in ["A", "ABERTO", "ABERTA", "DESLIGADO"]:
+            posope = "A"
+        elif base_posope in ["F", "FECHADO", "FECHADA", "LIGADO"]:
+            posope = "F"
+        else:
+            posope = ""
+
+        tipo = str(no.get("r_tipoeq", no.get("tipono", ""))).strip()
+        fases = str(no.get("r_fases", no.get("fases", ""))).strip().upper()
+        controle = str(no.get("r_controle", "")).strip().lower()
+        telecom = str(no.get("telecom", "")).strip().upper()
+
+        if telecom == "S" or any(w in controle for w in ["telecontrolado", "remoto", "automacao", "automatico"]):
+            telecontrolado = True
+        elif "manual" in controle or fases in ["A", "B", "C"]:
+            telecontrolado = False
+        else:
+            telecontrolado = None
+
+        refalm = str(no.get("refalm", cod_clean)).strip().upper()
+        refalm_2 = str(no.get("refalm_2", no.get("refalm2", ""))).strip().upper()
+        alims = [a for a in [refalm, refalm_2] if a]
+
+        rec = {
+            "numero": numeq,
+            "tipo": tipo,
+            "telecontrolado": telecontrolado,
+            "posope": posope,
+            "fases": fases,
+            "alimentadores": alims,
+            "localidade": str(no.get("logradouro", no.get("endereco_livre", ""))).strip(),
+            "municipio": str(no.get("municipio", "")).strip(),
+            "tensao": str(no.get("tensao", no.get("kv", ""))).strip(),
+            "origem": "GDIS_AO_VIVO"
+        }
+
+        # Indexa pelo número puro (ex: '107457')
+        if numeq not in equipamentos:
+            equipamentos[numeq] = []
+        equipamentos[numeq].append(rec)
+
+        # Indexa também com prefixo inferido para busca rápida
+        prefixo = _obter_prefixo_equipamento(numeq, rec)
+        if prefixo:
+            k_pref = f"{prefixo} - {numeq}"
+            if k_pref not in equipamentos:
+                equipamentos[k_pref] = []
+            equipamentos[k_pref].append(rec)
+
+    log_func(f"[GDIS Dinâmico] Sucesso: {len(nos)} nós recebidos ({len(equipamentos)} equipamentos indexados) para '{cod_clean}'.")
+    return equipamentos
 
 
 def _obter_prefixo_equipamento(eq, eq_data=None):
@@ -317,6 +443,9 @@ def _obter_prefixo_equipamento(eq, eq_data=None):
             if 'SECCIONATOR' in p_upper or 'SECCIONALIZADOR' in p_upper: return '23'
             if 'REGULADOR' in p_upper: return '02'
             if 'FUSIVEL' in p_upper or 'FUSÍVEL' in p_upper: return '04'
+            if 'FACA ADAPTADA' in p_upper or 'CHAVE FACA ADAPTADA' in p_upper: return '36'
+            if 'FACA UNIPOLAR' in p_upper: return '28'
+            if 'FACA' in p_upper: return '36'
             if 'SECCIONADORA' in p_upper: return '28'
             if 'TRANSFORMADOR' in p_upper or 'TRAFO' in p_upper: return '01'
 
@@ -408,11 +537,15 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
 
 def _obter_limite_pre_desligamento(manobra_dados):
     """
-    Retorna a cronologia máxima das etapas pré-desligamento (até o fim da etapa de DESLIGAMENTO ou antes do RELIGAMENTO).
-    Retorna -1 caso não haja etapas nem de DESLIGAMENTO nem de RELIGAMENTO.
+    Retorna a cronologia máxima das etapas pré-desligamento / pré-trabalho (fase de alívio e preparação).
+    Considera:
+    1. Etapa de DESLIGAMENTO (marca o fim da preparação da rede).
+    2. Etapa de AUTORIZACAO DO PLE/BI (marca a liberação da rede para a equipe e término do alívio).
+    3. Etapas de DISPENSA DO PLE/BI, NORMALIZAR, RELIGAMENTO, RECOMPOSIÇÃO (marcam o início da restauração/recomposição).
+    Retorna -1 caso não haja etapas de corte/desligamento nem autorização de PLE/BI.
     """
     limite_desligamento = -1
-    cron_primeiro_religamento = float('inf')
+    cron_primeiro_retorno = float('inf')
 
     for mi in manobra_dados:
         if not isinstance(mi, dict): continue
@@ -426,14 +559,19 @@ def _obter_limite_pre_desligamento(manobra_dados):
         
         if "DESLIGAMENTO" in nome_etapa and "RELIGAMENTO" not in nome_etapa:
             limite_desligamento = max(limite_desligamento, cron)
-        if "RELIGAMENTO" in nome_etapa:
+        elif "AUTORIZACAO" in nome_etapa or "AUTORIZAÇÃO" in nome_etapa:
+            limite_desligamento = max(limite_desligamento, cron)
+            
+        if any(w in nome_etapa for w in ["RELIGAMENTO", "DISPENSA", "NORMALIZAR", "RECOMPOSICAO", "RECOMPOSIÇÃO"]):
             if cron > 0:
-                cron_primeiro_religamento = min(cron_primeiro_religamento, cron)
+                cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
 
     if limite_desligamento != -1:
+        if cron_primeiro_retorno != float('inf') and cron_primeiro_retorno <= limite_desligamento:
+            return cron_primeiro_retorno - 1
         return limite_desligamento
-    elif cron_primeiro_religamento != float('inf'):
-        return cron_primeiro_religamento - 1
+    elif cron_primeiro_retorno != float('inf'):
+        return cron_primeiro_retorno - 1
     return -1
 
 
@@ -531,41 +669,28 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
     usuario = usuario_param if usuario_param else ((os.getenv("GDIS_USUARIO") or "").strip() or input("Usuário: ").strip())
     senha = senha_param if senha_param else ((os.getenv("GDIS_SENHA") or "").strip() or getpass.getpass("Senha: "))
 
-    if dados_equipamentos_cache is not None:
-        dados_equipamentos = dados_equipamentos_cache
-        print("[OK] Base de equipamentos carregada do cache.")
-    else:
-        print("\n[INFO] Carregando base de equipamentos... (O primeiro acesso pode levar alguns segundos)")
-        dados_equipamentos = _carregar_dados_equipamentos(log_func=log_func)
-        print("[OK] Base carregada com sucesso!")
+    # Modo 100% dinâmico via GDIS (sem dependência de bases estáticas CSV)
+    dados_equipamentos = dados_equipamentos_cache if isinstance(dados_equipamentos_cache, dict) else {}
+    print("[OK] Modo de conferência 100% dinâmica GDIS ativo (sem bases CSV estáticas).")
     
     parametros_conferidor = _obter_parametros_conferidor()
 
     print("\n[1] Iniciando navegador...")
-    import tempfile
     
     with sync_playwright() as p:
-        caminhos = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        browser_args = [
+            "--disable-dev-shm-usage", 
+            "--no-sandbox", 
+            "--disable-gpu", 
+            "--disable-software-rasterizer",
+            "--mute-audio", 
+            "--disable-extensions", 
+            "--disable-setuid-sandbox"
         ]
-        executavel = next((c for c in caminhos if os.path.exists(c)), None)
-        
-        # launch() básico com flags de estabilidade costuma ser mais resiliente que persistent_context no Windows Server
-        browser = p.chromium.launch(
-            executable_path=executavel,
-            headless=headless,
-            args=[
-                "--disable-dev-shm-usage", 
-                "--no-sandbox", 
-                "--disable-gpu",
-                "--disable-software-rasterizer",
-                "--mute-audio",
-                "--disable-extensions",
-                "--disable-setuid-sandbox"
-            ]
-        )
+        try:
+            browser = p.chromium.launch(channel="msedge", headless=headless, args=browser_args)
+        except Exception:
+            browser = p.chromium.launch(headless=headless, args=browser_args)
         
         context = browser.new_context(viewport={'width': 1280, 'height': 800})
         page = context.new_page()
@@ -578,6 +703,22 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 page.fill("input[id='formLogin:password']", senha)
                 page.click("input[id='formLogin:botao']")
                 page.wait_for_selector("input[id='formLogin:userid']", state="detached")
+
+            # Autenticação em segundo plano no GDIS Apoio para habilitar a API getRedeAlimentador
+            try:
+                page_apoio = context.new_page()
+                page_apoio.goto("http://gdis-apoio/gdisweb/login.jsf", timeout=12000)
+                if page_apoio.locator("input[id='form_login:login_username']").count() > 0:
+                    page_apoio.fill("input[id='form_login:login_username']", usuario)
+                    page_apoio.fill("input[id='form_login:login_pwd']", senha)
+                    page_apoio.click("input[id='form_login:login_ok']")
+                    try:
+                        page_apoio.wait_for_load_state("domcontentloaded", timeout=8000)
+                    except Exception:
+                        pass
+                page_apoio.close()
+            except Exception as e_apoio:
+                print(f"    [AVISO] Integração GDIS Apoio: {e_apoio}")
         except Exception:
             try: page.close()
             except Exception: pass
@@ -1307,8 +1448,37 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         print(f"          * Item {idx+1}: [{str_attrs}] ➔ Ação: {tx}")
                 
                 print("\n" + "="*115 + "\n")
-        
-                # O navegador será fechado agora (ao sair do bloco 'with'), economizando RAM para a validação.
+
+                # ============================================================
+                # ETAPA C: SINCRONIZAÇÃO DINÂMICA VIA GDIS (getRedeAlimentador)
+                # ============================================================
+                alims_envolvidos = set()
+                for md in manobra_dados:
+                    for campo_alim in ['alimentador', 'alim']:
+                        alm_val = str(md.get(campo_alim, '')).strip().upper()
+                        if alm_val and alm_val != '-' and len(alm_val) >= 4 and not alm_val.startswith('SEM'):
+                            m_alms = re.findall(r'\b([A-Z]{3,4}\s*\d{2,4})\b', alm_val)
+                            if m_alms:
+                                for ma in m_alms:
+                                    alims_envolvidos.add(re.sub(r'\s+', ' ', ma).strip())
+                            elif re.match(r'^[A-Z]{3,4}\s*\d{2,4}$', alm_val):
+                                alims_envolvidos.add(re.sub(r'\s+', ' ', alm_val).strip())
+
+                # Inclui também alimentadores da solicitação
+                for sl in solicitacao_locais:
+                    alm_s = str(sl.get('alimentador', '')).strip().upper()
+                    if alm_s and alm_s != '-':
+                        m_alms = re.findall(r'\b([A-Z]{3,4}\s*\d{2,4})\b', alm_s)
+                        for ma in m_alms:
+                            alims_envolvidos.add(re.sub(r'\s+', ' ', ma).strip())
+
+                if alims_envolvidos:
+                    print(f"\n[GDIS Dinâmico] Identificado(s) {len(alims_envolvidos)} alimentador(es) na Manobra: {', '.join(sorted(alims_envolvidos))}")
+                    for cod_alim in sorted(alims_envolvidos):
+                        dados_dinamicos = _consultar_topologia_gdis(context, cod_alim, usuario, log_func=print)
+                        if dados_dinamicos:
+                            for k, lista_recs in dados_dinamicos.items():
+                                dados_equipamentos[k] = lista_recs
 
                 print("\n[ RELATÓRIO DE VALIDAÇÃO GDIS ]")
 
@@ -1907,17 +2077,100 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         pass  # IGNORADA silenciosa
 
                     # REGRA 31 (Coerência de POSOPE: Abertura em NF, Fechamento em NA)
-                    posope = eq_data.get('posope', '')
+                    posope = str(eq_data.get('posope', eq_data.get('POSOPE', eq_data.get('estado', '')))).strip().upper()
+                    if posope in ['ABERTO', 'ABERTA', 'A', 'DESLIGADO']:
+                        posope = 'A'
+                    elif posope in ['FECHADO', 'FECHADA', 'F', 'LIGADO']:
+                        posope = 'F'
+                    else:
+                        posope = ''
+
+                    # Identifica sequência cronológica de operações do equipamento
+                    acoes_cronologicas = []
+                    for mi in sorted(manobra_items, key=lambda x: x.get('cronologia', 0)):
+                        t_lin = mi.get('texto_linha', '').upper()
+                        if macros_abertura.search(t_lin) or re.search(r'\bABRIR\b', t_lin):
+                            acoes_cronologicas.append('ABRIR')
+                        elif macros_fechamento.search(t_lin) or re.search(r'\bFECHAR\b', t_lin):
+                            acoes_cronologicas.append('FECHAR')
+
+                    txt_eq_completo = ' '.join([
+                        str(eq) + ' ' + 
+                        str(mi.get('texto_linha', '')) + ' ' + 
+                        str(mi.get('observacao', '')) + ' ' + 
+                        str(mi.get('etapa_nome', '')) + ' ' + 
+                        str(mi.get('etapa_texto_header', ''))
+                        for mi in manobra_items
+                    ]).upper()
+
+                    tem_indicativo_na = any(w in txt_eq_completo for w in [
+                        'GERADOR', 'UGTM', 'INTERLIG', 'SOCORRO', 'TRANSFERENCIA', 'PONTO DE SOCORRO'
+                    ])
+
+                    origem_cadastro = eq_data.get('origem', '')
+                    alims_cad = [str(a).upper() for a in eq_data.get('alimentadores', [])]
+                    divergencia_circuito = bool(alim_manobra and alims_cad and not any(alim_manobra.upper() in a for a in alims_cad))
+
+                    # Regra de Ouro da Topologia Operacional:
+                    # Se um equipamento é FECHADO no início da manobra e posteriormente ABERTO na recomposição,
+                    # o seu estado operacional de repouso no campo é ABERTO (NA).
+                    # Se o cadastro estático for antigo (ou tiver alimentador divergente/contexto de gerador),
+                    # a lógica da manobra prevalece para evitar falso-positivo em chaves NA.
+                    if acoes_cronologicas and acoes_cronologicas[0] == 'FECHAR' and 'ABRIR' in acoes_cronologicas[1:]:
+                        if origem_cadastro != 'GDIS_AO_VIVO' or tem_indicativo_na or divergencia_circuito:
+                            posope = 'A'
+                    elif acoes_cronologicas and acoes_cronologicas[0] == 'ABRIR' and 'FECHAR' in acoes_cronologicas[1:]:
+                        if origem_cadastro != 'GDIS_AO_VIVO' or divergencia_circuito:
+                            posope = 'F'
+
+                    # Inferência de POSOPE inicial caso ainda ausente no cadastro
+                    if not posope:
+                        # Termos explícitos de NA (Normal Aberto)
+                        tags_na = ['(NA)', 'CHAVE NA', 'POSOPE NA', 'POSOPE: NA',
+                                   'NORMAL ABERTO', 'NORMAL ABERTA',
+                                   'NORMALMENTE ABERTO', 'NORMALMENTE ABERTA']
+                        # Termos explícitos de NF (Normal Fechado)
+                        tags_nf = ['(NF)', 'CHAVE NF', 'POSOPE NF', 'POSOPE: NF',
+                                   'NORMAL FECHADO', 'NORMAL FECHADA',
+                                   'NORMALMENTE FECHADO', 'NORMALMENTE FECHADA']
+
+                        tem_na_explicito = (
+                            any(k in txt_eq_completo for k in tags_na)
+                            or bool(re.search(r'\bNA\b', txt_eq_completo))
+                        )
+                        tem_nf_explicito = (
+                            any(k in txt_eq_completo for k in tags_nf)
+                            or bool(re.search(r'\bNF\b', txt_eq_completo))
+                        )
+
+                        if tem_na_explicito and not tem_nf_explicito:
+                            posope = 'A'
+                        elif tem_nf_explicito and not tem_na_explicito:
+                            posope = 'F'
+                        else:
+                            # Estado ambíguo ou ausente: não assumir NF para evitar
+                            # falso positivo ao fechar um equipamento NA não rotulado.
+                            posope = ''
+
                     estado_simulado = posope
                     primeira_acao = None
                     erro_31 = []
         
-                    # Auxiliares para Regra de Sinalização Pré-Desligamento
+                    # Auxiliares para Regra de Sinalização Pré-Desligamento (Regra 42)
                     abriu_ate_desligamento = False
                     quem_abriu_ate_desligamento = ""
                     sinalizou_ate_desligamento = False
 
-                    is_primeiro_item_eq = True
+                    # Sincronização inicial por macros de supervisão em etapas de verificação (MA39/MA49)
+                    for mi in manobra_items:
+                        txt = mi['texto_linha'].upper()
+                        if re.search(r'\b\d*MA39\b', txt) or "CONFIRMAR EQUIPAMENTO ABERTO" in txt:
+                            if not estado_simulado:
+                                estado_simulado = "A"
+                        elif re.search(r'\b\d*MA49\b', txt) or "CONFIRMAR EQUIPAMENTO FECHADO" in txt:
+                            if not estado_simulado:
+                                estado_simulado = "F"
+
                     for mi in manobra_items:
                         etapa_txt = (mi.get('etapa_nome', '') + ' ' + mi.get('etapa_texto_header', '')).upper()
                         txt = mi['texto_linha'].upper()
@@ -1927,22 +2180,16 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
             
                         # --- REGRA 41: MA63 (TROCA DE ELO FUSÍVEL) ---
                         if "MA63" in txt:
-                             # Remove acentos para comparação robusta
-                             def normalizar(t):
-                                 import unicodedata
-                                 return "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
-                             if "REGIAO" not in normalizar(executor):
-                                 print_regra(41, "ERRO", f"Equipamento '{eq}': Macro MA63 (Troca de Elo) executada por '{executor}'. Exige ser executada pela Região.")
+                            if not any(k in executor for k in ("REGIAO", "REGIÃO")):
+                                print_regra(41, "ERRO", f"Equipamento '{eq}': Macro MA63 (Troca de Elo) executada por '{executor}'. Exige ser executada pela Região.")
 
-                        # --- REGRA 31: Sincronização Inicial ---
-                        if is_primeiro_item_eq:
-                            if "MA39" in txt: # Confirmar Aberto
-                                estado_simulado = "A"
-                                print_regra(31, "INFO", f"Sincronizando estado de '{eq}' para ABERTO via macro MA39.")
-                            elif "MA49" in txt: # Confirmar Fechado
-                                estado_simulado = "F"
-                                print_regra(31, "INFO", f"Sincronizando estado de '{eq}' para FECHADO via macro MA49.")
-                            is_primeiro_item_eq = False
+                        # --- REGRA 31: Sincronização Explícita na Linha ---
+                        if re.search(r'\b\d*MA39\b', txt):
+                            estado_simulado = "A"
+                            print_regra(31, "INFO", f"Sincronizando estado de '{eq}' para ABERTO via macro MA39.")
+                        elif re.search(r'\b\d*MA49\b', txt):
+                            estado_simulado = "F"
+                            print_regra(31, "INFO", f"Sincronizando estado de '{eq}' para FECHADO via macro MA49.")
 
                         is_abertura = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
                         is_fechamento = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
@@ -1957,14 +2204,17 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                         if is_abertura:
                             if not primeira_acao: primeira_acao = 'ABRIR'
+                            # Só emite erro se há certeza de que estava ABERTO (posope=A confirmado)
                             if estado_simulado == 'A':
-                                msg = f"Tentativa de Abertura em equipamento que já consta como Aberto (Estado={estado_simulado})"
+                                msg = f"Tentativa de Abertura em equipamento que já consta como Aberto (NA/POSOPE=A)"
                                 erro_31.append(msg)
                             estado_simulado = 'A'
                         elif is_fechamento:
                             if not primeira_acao: primeira_acao = 'FECHAR'
+                            # Só emite erro se há certeza de que estava FECHADO (posope=F confirmado).
+                            # Quando o estado é desconhecido (''), fechar é operação válida (equipamento NA → NF).
                             if estado_simulado == 'F':
-                                msg = f"Tentativa de Fechamento em equipamento que já consta como Fechado (Estado={estado_simulado})"
+                                msg = f"Tentativa de Fechamento em equipamento que já consta como Fechado (NF/POSOPE=F)"
                                 erro_31.append(msg)
                             estado_simulado = 'F'
 
@@ -1980,7 +2230,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         is_ab = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
                         is_fe = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
             
-                        eh_pre_desligamento = (limite_cronologia_desligamento == -1) or (cron <= limite_cronologia_desligamento)
+                        eh_pre_desligamento = (limite_cronologia_desligamento != -1) and (cron <= limite_cronologia_desligamento)
             
                         if eh_pre_desligamento:
                             if is_ab:
@@ -1996,14 +2246,29 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             erro_31.append(msg)
 
                     # --- REGRA 42: SINALIZAÇÃO PÓS-ABERTURA (ATÉ DESLIGAMENTO) ---
-                    if abriu_ate_desligamento and not sinalizou_ate_desligamento:
+                    # Aplica-se apenas a equipamentos pertencentes ao escopo da Solicitação GDIS
+                    if (eq in sol_dict) and abriu_ate_desligamento and not sinalizou_ate_desligamento:
                         if "COD" in quem_abriu_ate_desligamento:
                             print_regra(42, "ALERTA", f"Equipamento '{eq}': Abertura executada pelo COD até o desligamento sem a macro MA06 de sinalização.")
                         else:
                             print_regra(42, "ERRO", f"Equipamento '{eq}': Abertura executada por '{quem_abriu_ate_desligamento}' até o desligamento sem a macro MA06 (Sinalização). Insira a macro MA06.")
 
-                    # --- REGRA 31: EVOLUÇÃO DO ESTADO POSOPE / SEQUÊNCIA OPERATIVA ---
-                    if posope in ['A', 'F'] or primeira_acao or erro_31:
+                    # --- CASO ESPECIAL: REGULADOR DE TENSÃO (RT - PREFIXO 02) ---
+                    # Reguladores de Tensão não são chaves de abertura/fechamento (não possuem estado NA/NF).
+                    # Seu ciclo operativo consiste em neutralização e desligamento de controle (MA35) 
+                    # durante a transferência de carga e recolocação em serviço (MA36) na recomposição.
+                    if prefixo == "02":
+                        tem_ma35 = any(re.search(r'\b\d*MA35\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
+                        tem_ma36 = any(re.search(r'\b\d*MA36\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
+                        if tem_ma35 and tem_ma36:
+                            print_regra(31, "OK", f"Equipamento '{eq}' (Regulador de Tensão): Ciclo operativo validado com sucesso (MA35 Neutro ➔ MA36 Em Serviço).")
+                        elif tem_ma35:
+                            print_regra(31, "OK", f"Equipamento '{eq}' (Regulador de Tensão): Neutralização e bloqueio de comando aplicados (MA35).")
+                        elif tem_ma36:
+                            print_regra(31, "OK", f"Equipamento '{eq}' (Regulador de Tensão): Recolocação em serviço aplicada (MA36).")
+                        else:
+                            print_regra(31, "OK", f"Equipamento '{eq}' (Regulador de Tensão): Mantido em regime normal de operação.")
+                    elif posope in ['A', 'F'] or primeira_acao or erro_31:
                         if erro_31:
                             str_erros = " | ".join(sorted(set(erro_31)))
                             print_regra(31, "ERRO", f"Equipamento '{eq}': Incoerência no estado operacional ({str_erros}). Revise as ações de abertura/fechamento.")
@@ -2011,7 +2276,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             if posope in ['A', 'F']:
                                 print_regra(31, "OK", f"Ações coerentes com a evolução do estado POSOPE={posope} em '{eq}'.")
                             else:
-                                print_regra(31, "OK", f"Ações de {primeira_acao} coerentes na sequência operativa de '{eq}'.")
+                                print_regra(31, "ALERTA", f"Equipamento '{eq}': Não foi possível identificar o estado inicial do equipamento (sem tag NA/NF). Operação de {primeira_acao} permitida sem validação de redundância.")
                         else:
                             # Se não houve ação mas o estado final bate, pode ser sincronismo
                             tem_sinc = any(re.search(r'\b\d*(MA39|MA49)\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
@@ -2019,8 +2284,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                 print_regra(31, "INFO", f"Estado de '{eq}' sincronizado via macro de supervisão (MA39/MA49).")
                             elif posope in ['A', 'F']:
                                 print_regra(31, "OK", f"Equipamento '{eq}' manteve estado estável POSOPE={posope}.")
+                            else:
+                                print_regra(31, "ALERTA", f"Equipamento '{eq}': Não foi possível identificar o estado do equipamento (POSOPE/NA/NF ausente).")
                     else:
-                        pass # IGNORADA silenciosa
+                        print_regra(31, "ALERTA", f"Equipamento '{eq}': Não foi possível identificar o estado do equipamento (POSOPE/NA/NF ausente).")
 
                     # REGRA 8 (Macros exclusivas de RT)
                     macros_rt = ["MA35", "MA36", "MA77"]
@@ -2152,16 +2419,25 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         if 'REGIAO' in execut or 'REGIÃO' in execut:
                             if re.search(r'\b\d*MA01\b', mi['texto_linha'], re.IGNORECASE):
                                 teve_ma01_regiao = True
-                                if is_telecontrolado and not tem_mab9:
-                                    if not re.search(r'\bCORTE\s+DE\s+CARGA\b', mi['texto_linha'], re.IGNORECASE):
+                                txt_linha_obs = (str(mi.get('texto_linha', '')) + ' ' + str(mi.get('observacao', '')) + ' ' + str(mi.get('etapa_nome', '')) + ' ' + str(mi.get('etapa_texto_header', ''))).upper()
+                                
+                                is_na = (posope == 'A') or any(re.search(r'\b\d*MA39\b', item['texto_linha'], re.IGNORECASE) for item in manobra_items)
+                                tem_corte_ou_alivio = any(kw in txt_linha_obs for kw in [
+                                    'CORTE DE CARGA', 'CORTE DE CARGAS', 'SEM CARGA', 'CARGA ALIVIADA', 
+                                    'ALIVIO', 'ALÍVIO', 'TRANSFERIDA', 'TRANSFERENCIA', 'TRANSFERÊNCIA', 
+                                    'INTERLIGACAO', 'INTERLIGAÇÃO', 'ISOLAMENTO', 'SEM CORTE', 'CARGA ZERO', 'DESENERGIZADO', '0A', '0 A'
+                                ])
+                                
+                                if is_telecontrolado and not tem_mab9 and not is_na:
+                                    if not tem_corte_ou_alivio:
                                         falha_r13 = True
                     if falha_r13:
-                        print_regra(13, "ALERTA", f"Equipamento '{eq}': Abertura (MA01) pela Região exige a indicação 'CORTE DE CARGA' na observação.")
+                        print_regra(13, "ALERTA", f"Equipamento '{eq}': Abertura (MA01) pela Região exige a indicação 'CORTE DE CARGA' ou 'CARGA ALIVIADA' na observação.")
                     elif teve_ma01_regiao:
                         if not is_telecontrolado or tem_mab9:
                             print_regra(13, "OK", f"Abertura de equipamento manual ou justificado por MAB9 validada para '{eq}'.")
                         else:
-                            print_regra(13, "OK", f"Abertura local MA01 de '{eq}' confirmada com 'CORTE DE CARGA'.")
+                            print_regra(13, "OK", f"Abertura local MA01 de '{eq}' confirmada com indicação de carga/alívio.")
                     else:
                         pass  # IGNORADA silenciosa
 

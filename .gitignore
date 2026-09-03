@@ -9,9 +9,10 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Environment Variables
+# Environment Variables & Secrets
 .env
 *.env
+config_admin.json
 atividades.log
 erros.txt
 

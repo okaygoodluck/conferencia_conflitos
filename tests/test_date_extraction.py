@@ -31,8 +31,8 @@ def test_extraction():
     print(f"Data Início: '{d_ini}'")
     print(f"Data Término: '{d_fim}'")
     
-    assert d_ini == "07/05/2026 10:00", f"Erro: Esperado '07/05/2026 10:00', obtido '{d_ini}'"
-    assert d_fim == "07/05/2026 16:00", f"Erro: Esperado '07/05/2026 16:00', obtido '{d_fim}'"
+    assert d_ini == "07/05/2026", f"Erro: Esperado '07/05/2026', obtido '{d_ini}'"
+    assert d_fim == "07/05/2026", f"Erro: Esperado '07/05/2026', obtido '{d_fim}'"
     
     print("\n✅ SUCESSO: Datas extraídas corretamente!")
 

@@ -18,7 +18,7 @@ Write-Host "[1/3] Copiando scripts do servidor e documentação..." -ForegroundC
 Copy-Item -Path "SERVIDOR_CENTRAL.bat" -Destination "$packageName\SERVIDOR_CENTRAL.bat"
 Copy-Item -Path "COMO_CONFIGURAR_SERVIDOR.md" -Destination "$packageName\COMO_CONFIGURAR_SERVIDOR.md"
 Copy-Item -Path "requirements.txt" -Destination "$packageName\requirements.txt"
-if (Test-Path "config_admin.json") { Copy-Item -Path "config_admin.json" -Destination "$packageName\config_admin.json" }
+if (Test-Path "config_admin.json.example") { Copy-Item -Path "config_admin.json.example" -Destination "$packageName\config_admin.json.example" }
 
 Write-Host "[2/3] Copiando código-fonte (src) e assets..." -ForegroundColor Yellow
 Copy-Item -Path "src" -Destination "$packageName\src" -Recurse

@@ -249,7 +249,7 @@ def _parse_itens_tables(html_text):
     # Nota: 'etapasCadastradas' foi removida para evitar que termos de etapas como 'RISCO SISTEMA' sejam capturados como equipamentos.
 
     for t in re.finditer(
-        r'<table[^>]+id="([^"]*(?::itensCadastrados|:eqpsList|:solicitacaoList|:listaEquipamentos|:idTabelaItens|:locaisInterrupcao|:locais|statusModalContentTable))"[^>]*>([\s\S]*?)</table>',
+        r'<table[^>]+id="([^"]*(?::itensCadastrados|:eqpsList|:solicitacaoList|:listaEquipamentos|:idTabelaItens|:locaisInterrupcao|:locais|:etapasCadastradas|statusModalContentTable))"[^>]*>([\s\S]*?)</table>',
         html_text or "",
         flags=re.IGNORECASE,
     ):
@@ -329,20 +329,24 @@ def _parse_datas(html_text):
     blacklist_ids = ["eventosList", "historico", "scroller", "j_id181"]
     
     # Pré-filtra o HTML para focar nos containers de 'Negócio' (execução)
-    # Procuramos primeiro no painel de elaboração, que é o mais confiável
-    elaboracao_pattern = r'<div[^>]+id="[^"]*(?:tooglePanelElaboracaoManobra|panelPrincipal)[^"]*"[^>]*>([\s\S]*?)</div>\s*(?:<div|<!--)'
-    m_elaboracao = re.search(elaboracao_pattern, html_text, re.I)
-    
-    # Se não achou no painel específico, tenta containers maiores, mas excluindo eventos se possível
-    main_ids = ["formPrincipal", "statusModalContentTable", "etapasItensForm", "tooglePanelSolicitacao"]
-    main_pattern = r'<div[^>]+id="(?:' + "|".join(main_ids) + r')[^"]*"[^>]*>([\s\S]*?)</div>\s*(?:<div|<!--|<form)'
-    m_main = re.search(main_pattern, html_text, re.I)
-    
-    # Ordem de preferência: Elaboração > Geral > Full HTML
     search_areas = []
-    if m_elaboracao: search_areas.append(m_elaboracao.group(1))
-    if m_main: search_areas.append(m_main.group(1))
-    search_areas.append(html_text)
+
+    # 1. Painel específico de elaboração/detalhe de manobra (mais confiável)
+    m_el = re.search(r'<div[^>]+id="[^"]*(?:tooglePanelElaboracaoManobra|panelPrincipal)[^"]*"[^>]*>', html_text, re.I)
+    if m_el:
+        start_idx = m_el.end()
+        search_areas.append(html_text[start_idx:start_idx + 8000])
+
+    # 2. Containers principais do formulário
+    main_ids = ["formPrincipal", "statusModalContentTable", "etapasItensForm", "tooglePanelSolicitacao"]
+    m_main = re.search(r'<div[^>]+id="(?:' + "|".join(main_ids) + r')[^"]*"[^>]*>', html_text, re.I)
+    if m_main:
+        start_idx = m_main.end()
+        search_areas.append(html_text[start_idx:start_idx + 15000])
+
+    # 3. HTML limpo de filtros de pesquisa e sidebars (para evitar capturar datas de filtro)
+    html_cleaned = re.sub(r'<div[^>]+id="[^"]*(?:sidebar|painelPesquisa|filtro)[^"]*"[^>]*>[\s\S]*?</div>', '', html_text, flags=re.I)
+    search_areas.append(html_cleaned)
     
     d_ini = ""
     d_fim = ""

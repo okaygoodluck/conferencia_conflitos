@@ -34,27 +34,10 @@ CONDICAO_OPERATIVA = {
     '-': '-'
 }
 
-CONDICAO_OPERATIVA_CODIGO = {
-    'COM CARGA': 'CC',
-    'COM TENSAO': 'CT',
-    'SEM TENSAO': 'ST',
-    '-': '-'
-}
-
-# =========================================
-# ORIGEM DA AÇÃO
-# =========================================
-ORIGEM_ACAO = ['REDE DISTRIBUICAO', 'SUBESTACAO']
-
 # =========================================
 # EXECUTOR
 # =========================================
 EXECUTOR = ['COD', 'TÉCNICO', 'TECNICO', 'REGIAO', 'REGIÃO', 'SUPERVISOR']
-
-# =========================================
-# TIPO DE EQUIPAMENTO
-# =========================================
-TIPO_EQUIPAMENTO = ['ALIMENTADOR', 'EQPTO', 'SUBESTACAO', 'TRAFO']
 
 # =========================================
 # AÇÕES DA DISTRIBUIÇÃO

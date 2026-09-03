@@ -1,4 +1,2 @@
 playwright>=1.40.0
-pandas>=2.0
-openpyxl>=3.1
 networkx>=3.0

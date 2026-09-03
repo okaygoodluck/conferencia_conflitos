@@ -31,7 +31,6 @@ class TestGdisHttpExtrator(unittest.TestCase):
         # Valida que o loop HTML não usa regex catastrófica
         # Teste 1: Padrão normal de SolicitacaoGeral
         html = '... <a href="#" id="formList:tb:0:j_id225" name="formList:tb:0:j_id225" onclick="A4J...">1619750</a> ...'
-        from src.integration.gdis_http_extrator import extrair_uma_solicitacao
         # Precisamos isolar a função interna apenas copiando a lógica pra teste
         def _find_sol_links(html_text, numero):
             found = []
