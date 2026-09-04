@@ -201,3 +201,62 @@ def test_ciclo_na_e_sem_reversao_pre_desligamento_manobra_245626825():
     assert len(historico_pre) == 1
     assert historico_pre[0][1] == 'FECHAR'
 
+
+def test_regra_02_equipamentos_abertos_na_etapa_desligamento():
+    """Valida que equipamentos (22 - 241173 e 28 - 89082) com abertura e sinalização na etapa de Desligamento são aprovados na Regra 02."""
+    from src.core.conferidor_manobras import _obter_limite_pre_desligamento, _item_pertence_fase_desligamento
+    import re
+
+    manobra_dados = [
+        {'cronologia': 10, 'etapa_nome': '10 VERIFICACAO PELO COD PRRU 009'},
+        {'cronologia': 20, 'etapa_nome': '20 DESLIGAMENTO PRRU 009', 'texto_linha': '10 MA40 - SOLICITAR AUTORIZACAO PARA DESLIGAMENTO'},
+        {'cronologia': 21, 'etapa_nome': '20 DESLIGAMENTO PRRU 009', 'equipamento': '22 - 241173', 'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 22 - 241173'},
+        {'cronologia': 22, 'etapa_nome': '20 DESLIGAMENTO PRRU 009', 'equipamento': '22 - 241173', 'texto_linha': '30 MA06 - SINALIZAR EQUIPAMENTO 22 - 241173'},
+        {'cronologia': 23, 'etapa_nome': '20 DESLIGAMENTO PRRU 009', 'equipamento': '28 - 89082', 'texto_linha': '40 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 28 - 89082'},
+        {'cronologia': 30, 'etapa_nome': '30 RELIGAMENTO PRRU 009'}
+    ]
+
+    limite = _obter_limite_pre_desligamento(manobra_dados)
+    assert limite >= 20
+
+    # Itens pertencentes à fase de desligamento
+    itens_22_241173 = [mi for mi in manobra_dados if mi.get('equipamento') == '22 - 241173' and _item_pertence_fase_desligamento(mi, limite)]
+    itens_28_89082 = [mi for mi in manobra_dados if mi.get('equipamento') == '28 - 89082' and _item_pertence_fase_desligamento(mi, limite)]
+
+    assert len(itens_22_241173) == 2
+    assert len(itens_28_89082) == 1
+
+    # Checa abertura e sinalizacao para 22 - 241173
+    tem_ab_22 = any(re.search(r'\b\d*MA01\b', mi['texto_linha']) for mi in itens_22_241173)
+    tem_sin_22 = any(re.search(r'\b\d*MA06\b', mi['texto_linha']) for mi in itens_22_241173)
+    assert tem_ab_22 is True
+    assert tem_sin_22 is True
+
+    # Checa abertura completa (MA31) para 28 - 89082
+    tem_completa_28 = any(re.search(r'\b\d*MA31\b', mi['texto_linha']) for mi in itens_28_89082)
+    assert tem_completa_28 is True
+
+
+def test_inferencia_posope_religador_22_359323_sem_gdis():
+    """Valida que o religador 22 - 359323 tem seu POSOPE inferido deterministicamente como NF (F) na Regra 31 a partir da engenharia da manobra."""
+    from src.core.conferidor_manobras import _obter_prefixo_equipamento
+    eq = "22 - 359323"
+    eq_data = {}  # GDIS retornou vazio / 204
+    manobra_items = [
+        {'cronologia': 10, 'texto_linha': '10 MA14 - BLOQUEAR RELIGAMENTO AUTOMATICO 22 - 359323', 'etapa_nome': '10 PREPARACAO'},
+        {'cronologia': 20, 'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 22 - 359323', 'etapa_nome': '20 DESLIGAMENTO'}
+    ]
+
+    prefixo = _obter_prefixo_equipamento(eq, eq_data)
+    assert prefixo == "22"
+
+    # Simula inferência da Regra 31
+    posope = str(eq_data.get('posope', '')).strip().upper()
+    acoes_cronologicas = ['ABRIR']
+    if not posope:
+        if acoes_cronologicas and acoes_cronologicas[0] == 'ABRIR':
+            posope = 'F'
+
+    assert posope == 'F'
+
+

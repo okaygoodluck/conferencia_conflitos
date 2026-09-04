@@ -276,12 +276,29 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
         log_func(f"[GDIS Dinâmico] Aviso ao obter cookies da sessão: {e_cook}")
 
     candidatos = [cod_clean]
-    if ' ' in cod_clean:
+    m = re.match(r'^([A-Z]{3,4})[\s\-_/]*(\d{1,4})$', cod_clean)
+    if m:
+        subes = m.group(1)
+        num_str = m.group(2)
+        num_int = int(num_str)
+        candidatos.extend([
+            f"{subes} {num_str}",
+            f"{subes}{num_str}",
+            f"{subes}-{num_str}",
+            f"{subes} {num_int:02d}",
+            f"{subes}{num_int:02d}",
+            f"{subes}-{num_int:02d}",
+            f"{subes} {num_int:03d}",
+            f"{subes}{num_int:03d}",
+            f"{subes} {num_int}",
+            f"{subes}{num_int}"
+        ])
+    elif ' ' in cod_clean:
         candidatos.append(cod_clean.replace(' ', ''))
-    else:
-        m = re.match(r'^([A-Z]{3,4})(\d{2,4})$', cod_clean)
-        if m:
-            candidatos.append(f"{m.group(1)} {m.group(2)}")
+
+    # Deduplica preservando ordem
+    vistos = set()
+    candidatos = [c for c in candidatos if not (c in vistos or vistos.add(c))]
 
     dados_json = None
     for cand in candidatos:
@@ -372,10 +389,15 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
         if not numeq or numeq == "-":
             continue
 
-        base_posope = str(no.get("POSOPE", no.get("posope", no.get("estado", "")))).strip().upper()
-        if base_posope in ["A", "ABERTO", "ABERTA", "DESLIGADO"]:
+        base_posope = str(
+            no.get("POSOPE") or no.get("posope") or no.get("r_posope") or 
+            no.get("estado") or no.get("r_estado") or no.get("pos_ope") or 
+            no.get("posOpe") or no.get("situacao") or no.get("posicao") or ""
+        ).strip().upper()
+
+        if base_posope in ["A", "ABERTO", "ABERTA", "DESLIGADO", "NA", "N.A.", "NORMALMENTE ABERTO", "NORMALMENTE ABERTA", "NORMAL ABERTO", "NORMAL ABERTA", "AB", "0"]:
             posope = "A"
-        elif base_posope in ["F", "FECHADO", "FECHADA", "LIGADO"]:
+        elif base_posope in ["F", "FECHADO", "FECHADA", "LIGADO", "NF", "N.F.", "NORMALMENTE FECHADO", "NORMALMENTE FECHADA", "NORMAL FECHADO", "NORMAL FECHADA", "FC", "1"]:
             posope = "F"
         else:
             posope = ""
@@ -409,15 +431,20 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
             "origem": "GDIS_AO_VIVO"
         }
 
-        # Indexa pelo número puro (ex: '107457')
+        # Indexa pelo número puro (ex: '359323')
+        numeq_clean = _get_eq_id(numeq) or numeq
         if numeq not in equipamentos:
             equipamentos[numeq] = []
         equipamentos[numeq].append(rec)
+        if numeq_clean != numeq:
+            if numeq_clean not in equipamentos:
+                equipamentos[numeq_clean] = []
+            equipamentos[numeq_clean].append(rec)
 
         # Indexa também com prefixo inferido para busca rápida
         prefixo = _obter_prefixo_equipamento(numeq, rec)
-        if prefixo:
-            k_pref = f"{prefixo} - {numeq}"
+        if prefixo and numeq_clean:
+            k_pref = f"{prefixo} - {numeq_clean}"
             if k_pref not in equipamentos:
                 equipamentos[k_pref] = []
             equipamentos[k_pref].append(rec)
@@ -537,11 +564,11 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
 
 def _obter_limite_pre_desligamento(manobra_dados):
     """
-    Retorna a cronologia máxima das etapas pré-desligamento / pré-trabalho (fase de alívio e preparação).
+    Retorna a cronologia máxima das etapas pré-desligamento / pré-trabalho (fase de alívio, preparação e desligamento).
     Considera:
-    1. Etapa de DESLIGAMENTO (marca o fim da preparação da rede).
-    2. Etapa de AUTORIZACAO DO PLE/BI (marca a liberação da rede para a equipe e término do alívio).
-    3. Etapas de DISPENSA DO PLE/BI, NORMALIZAR, RELIGAMENTO, RECOMPOSIÇÃO (marcam o início da restauração/recomposição).
+    1. Etapas de DESLIGAMENTO, CORTE, ISOLAMENTO e AUTORIZAÇÃO DO PLE/BI.
+    2. Etapas de DISPENSA DO PLE/BI, NORMALIZAR, RELIGAMENTO, RECOMPOSIÇÃO (marcam o início da restauração/recomposição pós-obra).
+    Garante que a etapa de desligamento nunca seja descartada prematuramente por menções internas a bloqueios ou prazos.
     Retorna -1 caso não haja etapas de corte/desligamento nem autorização de PLE/BI.
     """
     limite_desligamento = -1
@@ -557,22 +584,54 @@ def _obter_limite_pre_desligamento(manobra_dados):
         
         cron = mi.get('cronologia', 0)
         
-        if "DESLIGAMENTO" in nome_etapa and "RELIGAMENTO" not in nome_etapa:
-            limite_desligamento = max(limite_desligamento, cron)
-        elif "AUTORIZACAO" in nome_etapa or "AUTORIZAÇÃO" in nome_etapa:
+        eh_deslig = any(w in nome_etapa for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]) and "RELIGAMENTO" not in nome_etapa
+        eh_aut = any(w in nome_etapa for w in ["AUTORIZACAO", "AUTORIZAÇÃO"]) and "DISPENSA" not in nome_etapa
+
+        if eh_deslig or eh_aut:
             limite_desligamento = max(limite_desligamento, cron)
             
-        if any(w in nome_etapa for w in ["RELIGAMENTO", "DISPENSA", "NORMALIZAR", "RECOMPOSICAO", "RECOMPOSIÇÃO"]):
+        termos_retorno = ["RELIGAMENTO", "DISPENSA DO PLE", "DISPENSA DO BI", "DISPENSA DE PLE", "RECOMPOSICAO", "RECOMPOSIÇÃO", "RESTABELECIMENTO"]
+        tem_retorno = any(w in nome_etapa for w in termos_retorno) or ("NORMALIZAR" in nome_etapa and not eh_deslig)
+        if tem_retorno:
             if cron > 0:
                 cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
 
     if limite_desligamento != -1:
-        if cron_primeiro_retorno != float('inf') and cron_primeiro_retorno <= limite_desligamento:
-            return cron_primeiro_retorno - 1
         return limite_desligamento
     elif cron_primeiro_retorno != float('inf'):
         return cron_primeiro_retorno - 1
     return -1
+
+
+def _item_pertence_fase_desligamento(mi, limite_cronologia_desligamento):
+    """
+    Verifica se o item da manobra pertence à fase de preparação/desligamento (inclusive toda a etapa de desligamento).
+    Garante que ações de abertura e delimitação executadas na etapa de desligamento sejam contabilizadas na Regra 02.
+    """
+    nome_et = (
+        str(mi.get('etapa_nome', '')) + ' ' + 
+        str(mi.get('etapa_texto_header', '')) + ' ' + 
+        str(mi.get('grupo_id', ''))
+    ).upper()
+    
+    # Etapas explícitas de recomposição pós-obra não pertencem à fase de desligamento
+    if any(w in nome_et for w in ["RELIGAMENTO", "RECOMPOSICAO", "RECOMPOSIÇÃO", "RESTABELECIMENTO"]):
+        return False
+    if any(w in nome_et for w in ["DISPENSA DO PLE", "DISPENSA DO BI", "DISPENSA DE PLE"]):
+        return False
+    if "NORMALIZAR" in nome_et and not any(w in nome_et for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]):
+        return False
+
+    # Etapas explícitas de desligamento, isolamento, corte ou autorização pertencem sempre à fase
+    if any(w in nome_et for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO", "AUTORIZACAO", "AUTORIZAÇÃO"]):
+        return True
+
+    # Demais itens anteriores ao retorno pós-obra
+    cron = mi.get('cronologia', 0)
+    if limite_cronologia_desligamento == -1 or cron <= limite_cronologia_desligamento:
+        return True
+
+    return False
 
 
 def _obter_fases_equipamento(eq_nome, eq_data=None, mi=None, sol_info=None):
@@ -1453,24 +1512,29 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 # ETAPA C: SINCRONIZAÇÃO DINÂMICA VIA GDIS (getRedeAlimentador)
                 # ============================================================
                 alims_envolvidos = set()
-                for md in manobra_dados:
-                    for campo_alim in ['alimentador', 'alim']:
-                        alm_val = str(md.get(campo_alim, '')).strip().upper()
-                        if alm_val and alm_val != '-' and len(alm_val) >= 4 and not alm_val.startswith('SEM'):
-                            m_alms = re.findall(r'\b([A-Z]{3,4}\s*\d{2,4})\b', alm_val)
-                            if m_alms:
-                                for ma in m_alms:
-                                    alims_envolvidos.add(re.sub(r'\s+', ' ', ma).strip())
-                            elif re.match(r'^[A-Z]{3,4}\s*\d{2,4}$', alm_val):
-                                alims_envolvidos.add(re.sub(r'\s+', ' ', alm_val).strip())
+                regex_alim_patt = re.compile(r'\b([A-Z]{3,4}\s*[-/]?\s*\d{1,4})\b', re.IGNORECASE)
 
-                # Inclui também alimentadores da solicitação
+                def _registrar_alims(val):
+                    if not val: return
+                    s_val = str(val).strip().upper()
+                    if len(s_val) < 3 or s_val.startswith('SEM'): return
+                    encontrados = regex_alim_patt.findall(s_val)
+                    for ea in encontrados:
+                        m_n = re.match(r'^([A-Z]{3,4})\s*[-/]?\s*(\d{1,4})$', ea.strip())
+                        if m_n:
+                            alims_envolvidos.add(f"{m_n.group(1)} {m_n.group(2)}")
+                        else:
+                            alims_envolvidos.add(re.sub(r'\s+', ' ', ea).strip())
+
+                for md in manobra_dados:
+                    for c_nome in ['alimentador', 'alim', 'texto_linha', 'observacao', 'etapa_nome', 'etapa_texto_header']:
+                        _registrar_alims(md.get(c_nome, ''))
+
                 for sl in solicitacao_locais:
-                    alm_s = str(sl.get('alimentador', '')).strip().upper()
-                    if alm_s and alm_s != '-':
-                        m_alms = re.findall(r'\b([A-Z]{3,4}\s*\d{2,4})\b', alm_s)
-                        for ma in m_alms:
-                            alims_envolvidos.add(re.sub(r'\s+', ' ', ma).strip())
+                    _registrar_alims(sl.get('alimentador', ''))
+
+                for eh in manobra_etapas_headers:
+                    _registrar_alims(eh.get('texto', ''))
 
                 if alims_envolvidos:
                     print(f"\n[GDIS Dinâmico] Identificado(s) {len(alims_envolvidos)} alimentador(es) na Manobra: {', '.join(sorted(alims_envolvidos))}")
@@ -2147,10 +2211,28 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             posope = 'A'
                         elif tem_nf_explicito and not tem_na_explicito:
                             posope = 'F'
+                        elif acoes_cronologicas:
+                            # Inferência de Engenharia Operacional CEMIG:
+                            # Se a primeira ação é ABRIR (ex: para desligamento), seu estado sob carga era FECHADO (NF).
+                            # Se a primeira ação é FECHAR (ex: socorro/transferência), seu estado sob repouso era ABERTO (NA).
+                            if acoes_cronologicas[0] == 'ABRIR':
+                                posope = 'F'
+                                print_regra(31, "INFO", f"Estado de '{eq}' determinado como NF (Normalmente Fechado) a partir da ação inicial de ABERTURA.")
+                            elif acoes_cronologicas[0] == 'FECHAR':
+                                posope = 'A'
+                                print_regra(31, "INFO", f"Estado de '{eq}' determinado como NA (Normalmente Aberto) a partir da ação inicial de FECHAMENTO.")
                         else:
-                            # Estado ambíguo ou ausente: não assumir NF para evitar
-                            # falso positivo ao fechar um equipamento NA não rotulado.
-                            posope = ''
+                            # Equipamento sem ações de abertura/fechamento diretas (apenas bloqueio ou sinalização)
+                            # Para Religadores (prefixo 22) e Disjuntores (prefixo 21): regime normal da rede é NF (Fechado).
+                            tem_bloqueio_relig = any(re.search(r'\b\d*(MA14|MA15|MA16|MA17|MA21|MA28)\b', mi.get('texto_linha', ''), re.IGNORECASE) for mi in manobra_items)
+                            if prefixo in ['21', '22'] or tem_bloqueio_relig:
+                                posope = 'F'
+                                print_regra(31, "INFO", f"Equipamento '{eq}' (Religador/Disjuntor): Regime operacional determinado como NF (Normalmente Fechado) por padrão de rede.")
+                            elif (eq in sol_dict or any(_get_eq_id(k) == _get_eq_id(eq) for k in sol_dict)) and not tem_indicativo_na:
+                                posope = 'F'
+                                print_regra(31, "INFO", f"Equipamento '{eq}' (Alvo da Solicitação): Determinado como NF por delimitação da zona de trabalho.")
+                            else:
+                                posope = ''
 
                     estado_simulado = posope
                     primeira_acao = None
@@ -2630,21 +2712,36 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     prefixo_eq = _obter_prefixo_equipamento(eq, eq_data_loop)
         
                     # REGRA 2 (Ação Inicial de Abertura e Sinalização até o Desligamento) - Apenas para equipamentos da solicitação
-                    if eq in sol_dict:
-                        itens_ate_deslig = [mi for mi in manobra_items if limite_cronologia_desligamento == -1 or mi.get('cronologia', 0) <= limite_cronologia_desligamento]
-            
-                        tem_completa = any(re.search(r'\b\d*(MA31|MA30)\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
-                        tem_ma01 = any(re.search(r'\b\d*MA01\b', mi['texto_linha'], re.IGNORECASE) or re.search(r'\bABRIR\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
-                        tem_sinalizacao = any(re.search(r'\b\d*MA06\b', mi['texto_linha'], re.IGNORECASE) or re.search(r'\b(sinalizar|sinalizado)\b', mi['texto_linha'], re.IGNORECASE) for mi in itens_ate_deslig)
+                    eq_id_atual = _get_eq_id(eq)
+                    is_sol_eq = (eq in sol_dict) or any(_get_eq_id(k) == eq_id_atual for k in sol_dict.keys())
 
-                        if tem_completa:
-                            print_regra(2, "OK", f"Equipamento '{eq}': Ação inicial completa de Abertura e Sinalização (MA31/MA30) confirmada até o desligamento.")
-                        elif tem_ma01 and tem_sinalizacao:
-                            print_regra(2, "OK", f"Equipamento '{eq}': Abertura (MA01) e Sinalização (MA06) confirmadas até o desligamento.")
-                        elif tem_sinalizacao and not tem_ma01:
-                            print_regra(2, "OK", f"Equipamento '{eq}': Sinalização (MA06) confirmada até o desligamento (Equipamento de delimitação NA/NF).")
-                        elif tem_ma01 and not tem_sinalizacao:
-                            print_regra(2, "ALERTA", f"Equipamento '{eq}': Abertura (MA01) executada até o desligamento sem a macro MA06 (Sinalização). Insira a macro MA06.")
+                    if is_sol_eq:
+                        itens_ate_deslig = [mi for mi in manobra_items if _item_pertence_fase_desligamento(mi, limite_cronologia_desligamento)]
+            
+                        tem_completa = any(
+                            re.search(r'\b\d*(MA31|MA30|MA18|MAA9)\b', mi['texto_linha'], re.IGNORECASE) or
+                            ("ABRIR" in mi['texto_linha'].upper() and any(w in mi['texto_linha'].upper() for w in ["SINALIZ", "PLACA"]))
+                            for mi in itens_ate_deslig
+                        )
+                        tem_abertura = any(
+                            re.search(r'\b\d*(MA01|MA18|MA19|MA30|MA31|MA58|MA60|MAA4|MAA5|MAA9|MAB0)\b', mi['texto_linha'], re.IGNORECASE) or 
+                            re.search(r'\bABRIR\b', mi['texto_linha'], re.IGNORECASE) or
+                            "ABERTURA" in mi['texto_linha'].upper()
+                            for mi in itens_ate_deslig
+                        )
+                        tem_sinalizacao = any(
+                            re.search(r'\b\d*(MA06|MA08|MA18|MA30|MA31|MA54|MA56|MA88|MAA6|MAA9)\b', mi['texto_linha'], re.IGNORECASE) or 
+                            re.search(r'\b(sinalizar|sinalizado|sinalizacao|sinalização)\b', mi['texto_linha'], re.IGNORECASE) or
+                            "PLACA" in mi['texto_linha'].upper()
+                            for mi in itens_ate_deslig
+                        )
+
+                        if tem_completa or (tem_abertura and tem_sinalizacao):
+                            print_regra(2, "OK", f"Equipamento '{eq}': Abertura e Sinalização confirmadas até a etapa de Desligamento.")
+                        elif tem_sinalizacao and not tem_abertura:
+                            print_regra(2, "OK", f"Equipamento '{eq}': Sinalização confirmada até a etapa de Desligamento (Equipamento de delimitação NA/NF).")
+                        elif tem_abertura and not tem_sinalizacao:
+                            print_regra(2, "ALERTA", f"Equipamento '{eq}': Abertura executada até o desligamento sem a macro MA06 (Sinalização). Insira a macro MA06.")
                         else:
                             print_regra(2, "ALERTA", f"Equipamento '{eq}': Ausência de ação de Abertura (MA01/MA31) ou Sinalização (MA06) até o desligamento. Insira a macro correspondente.")
 
