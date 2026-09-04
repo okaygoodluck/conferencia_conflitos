@@ -328,4 +328,76 @@ def test_manobra_transferencia_com_carga_e_desligamento_245643023():
         assert len(hist_pre) <= 1, f"Equipamento {eq_test} não deve ter mais de 1 ação pré-desligamento: {hist_pre}"
 
 
+def test_regra42_sinalizacao_ma06_em_desligamento_245585526():
+    """
+    Valida a manobra 245585526 onde:
+    - 22 - 464229 é aberto pelo COD na Etapa 30 (MA01).
+    - Etapa 40 possui cabeçalho/item com NORMALIZAR RN/ST (não pode antecipar retorno).
+    - 22 - 464229 possui MA06 na Etapa 50 de Desligamento.
+    Garante que:
+    1. O limite pré-desligamento não é prematuramente cortado na Etapa 40.
+    2. A macro MA06 na Etapa 50 é reconhecida e a Regra 42 não acusa falso alerta.
+    """
+    from src.core.conferidor_manobras import _obter_limite_pre_desligamento, _item_pertence_fase_desligamento
+    import re
 
+    manobra_dados = [
+        # Etapa 30: Manobra onde o COD abre 22 - 464229
+        {
+            'cronologia': 20,
+            'etapa_nome': '30 MANOBRA CLUD207 13/09/2026 08:00',
+            'equipamento': '22 - 464229',
+            'texto_linha': '40 MA01 - ABRIR EQUIPAMENTO 22 - 464229 CLUD216',
+            'executor': 'COD'
+        },
+        # Etapa 40: Contém macro MA07 com texto 'NORMALIZAR RN/ST'
+        {
+            'cronologia': 25,
+            'etapa_nome': '40 MANOBRA CLUD207 13/09/2026 09:00',
+            'texto_linha': '50 MA07 - RETIRAR SINALIZACAO E NORMALIZAR RN/ST CLUD212',
+            'executor': 'COD'
+        },
+        # Etapa 50: Desligamento onde Supervisor sinaliza 22 - 464229
+        {
+            'cronologia': 31,
+            'etapa_nome': '50 DESLIGAMENTO CLUD207 13/09/2026 10:00',
+            'equipamento': '22 - 464229',
+            'texto_linha': '50 MA64 - COLOCAR CONTROLE DO EQUIPAMENTO EM MODO LOCAL 22 - 464229',
+            'executor': 'Supervisor'
+        },
+        {
+            'cronologia': 32,
+            'etapa_nome': '50 DESLIGAMENTO CLUD207 13/09/2026 10:00',
+            'equipamento': '22 - 464229',
+            'texto_linha': '60 MA06 - VERIFICAR EQUIPAMENTO ABERTO E SINALIZAR 22 - 464229',
+            'executor': 'Supervisor'
+        },
+        # Etapa 60: Religamento
+        {
+            'cronologia': 53,
+            'etapa_nome': '60 RELIGAMENTO CLUD207 13/09/2026 15:00',
+            'texto_linha': '80 MA43 - RETIRAR ATERRAMENTO DOS CIRCUITOS CLUD',
+            'executor': 'Supervisor'
+        }
+    ]
+
+    limite = _obter_limite_pre_desligamento(manobra_dados)
+    # Limite pré-desligamento deve cobrir toda a etapa 50 (até cronologia 52, antes do religamento cron 53)
+    assert limite >= 32
+
+    # Validação do rastreio da Regra 42
+    macros_abertura = re.compile(r'\b\d*(MA01|MA31|MA30|MA18|MA22|MA24|MA54|MA56|MAA9)\b(?!\s*-\s*OUTROS)')
+    abriu_ate_desligamento = False
+    sinalizou_ate_desligamento = False
+
+    for mi in [m for m in manobra_dados if m.get('equipamento') == '22 - 464229']:
+        txt = mi['texto_linha'].upper()
+        is_abertura = bool(macros_abertura.search(txt) or 'ABRIR' in txt)
+        if _item_pertence_fase_desligamento(mi, limite):
+            if is_abertura:
+                abriu_ate_desligamento = True
+            if any(m in txt for m in ["MA06", "MA31", "MA30", "MAA9", "MA54", "MA56", "MA88"]):
+                sinalizou_ate_desligamento = True
+
+    assert abriu_ate_desligamento is True
+    assert sinalizou_ate_desligamento is True

@@ -582,6 +582,9 @@ def _obter_limite_pre_desligamento(manobra_dados):
             str(mi.get('grupo_id', ''))
         ).upper()
         
+        # Limpa vazamento de itens ou lixo de tabela dentro do nome/cabeçalho da etapa
+        nome_etapa = re.split(r'\bITENS\b|N[º°]?\s*A[ÇC][ÃA]O|SIMPLETOGGLEPANEL', nome_etapa, flags=re.IGNORECASE)[0].strip()
+        
         cron = mi.get('cronologia', 0)
         
         eh_deslig = any(w in nome_etapa for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]) and "RELIGAMENTO" not in nome_etapa
@@ -596,7 +599,9 @@ def _obter_limite_pre_desligamento(manobra_dados):
             limite_desligamento = max(limite_desligamento, cron)
             
         termos_retorno = ["RELIGAMENTO", "DISPENSA DO PLE", "DISPENSA DO BI", "DISPENSA DE PLE", "RECOMPOSICAO", "RECOMPOSIÇÃO", "RESTABELECIMENTO"]
-        tem_retorno = any(w in nome_etapa for w in termos_retorno) or ("NORMALIZAR" in nome_etapa and not eh_deslig)
+        tem_retorno = any(w in nome_etapa for w in termos_retorno) or (
+            bool(re.search(r'\bNORMALIZA[CÇ][AÃ]O\b|\bNORMALIZAR\s+(?:A\s+)?REDE\b', nome_etapa)) and not eh_deslig
+        )
         if tem_retorno:
             if cron > 0:
                 cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
@@ -1108,6 +1113,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 for idx, mi in enumerate(manobra_dados, start=1):
                     if 'cronologia' not in mi or not mi['cronologia']:
                         mi['cronologia'] = idx
+                    
+                    # Limpa vazamento de tabelas/corpo de itens dentro dos nomes/cabeçalhos de etapas
+                    for fld in ['etapa_nome', 'etapa_texto_header']:
+                        if mi.get(fld):
+                            mi[fld] = re.split(r'\bItens\b|N[º°]?\s*A[çc][ãa]o|SimpleTogglePanel', str(mi[fld]), flags=re.IGNORECASE)[0].strip()
+                    
                     n = ultimo_n + 10
                     # Pega o número real da coluna Nº caso exista no texto (ex: "10 MA31... ")
                     partes = mi.get('texto_linha', '').split()
@@ -1534,9 +1545,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             continue
                         m_n = re.match(r'^([A-Z]{3,4})\s*[-/]?\s*(\d{1,4})$', ea.strip())
                         if m_n:
+                            prefixo_alim = m_n.group(1).upper()
+                            if prefixo_alim in {'SIM', 'NAO', 'SEM', 'COM', 'ITEM', 'ETAP', 'DATA', 'HORA', 'SUB', 'OBS', 'LOCA', 'CHAV', 'TRAF', 'EQP', 'COD'}:
+                                continue
                             alims_envolvidos.add(f"{m_n.group(1)} {m_n.group(2)}")
                         else:
-                            alims_envolvidos.add(re.sub(r'\s+', ' ', ea).strip())
+                            cand_str = re.sub(r'\s+', ' ', ea).strip().upper()
+                            if not any(cand_str.startswith(p) for p in ['SIM', 'NAO', 'SEM', 'COM', 'ITEM']):
+                                alims_envolvidos.add(cand_str)
 
                 for md in manobra_dados:
                     for c_nome in ['alimentador', 'alim', 'texto_linha', 'observacao', 'etapa_nome', 'etapa_texto_header']:
@@ -2289,7 +2305,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         is_fechamento = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
 
                         # --- RASTREIO PARA REGRA DE SINALIZAÇÃO ---
-                        if cron <= limite_cronologia_desligamento:
+                        if _item_pertence_fase_desligamento(mi, limite_cronologia_desligamento):
                             if is_abertura:
                                 abriu_ate_desligamento = True
                                 quem_abriu_ate_desligamento = executor
@@ -2830,6 +2846,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                 counts_bloqueios[m_lock][zona] += 1
 
                         for nome_grupo, (aberturas, fechamentos) in rastreamento_inversas.items():
+                            # Chaves operadas SEM TENSÃO (ex: abertura/fechamento definitivo durante desligamento/religamento)
+                            # não constituem transferências provisórias e não exigem inversão dentro da manobra.
+                            is_sem_tensao = any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
+                            if nome_grupo == "Abertura Simples (MA01/MA02)" and is_sem_tensao:
+                                continue
+
                             for m_ab in aberturas:
                                 if re.search(_re_macro(m_ab), txt):
                                     saldos[nome_grupo] += 1
