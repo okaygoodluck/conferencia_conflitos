@@ -585,7 +585,12 @@ def _obter_limite_pre_desligamento(manobra_dados):
         cron = mi.get('cronologia', 0)
         
         eh_deslig = any(w in nome_etapa for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]) and "RELIGAMENTO" not in nome_etapa
-        eh_aut = any(w in nome_etapa for w in ["AUTORIZACAO", "AUTORIZAÇÃO"]) and "DISPENSA" not in nome_etapa
+        eh_aut = any(w in nome_etapa for w in [
+            "AUTORIZACAO DO PLE", "AUTORIZAÇÃO DO PLE", 
+            "AUTORIZACAO DO BI", "AUTORIZAÇÃO DO BI", 
+            "AUTORIZACAO PARA DESLIGAMENTO", "AUTORIZAÇÃO PARA DESLIGAMENTO",
+            "AUTORIZACAO DE DESLIGAMENTO", "AUTORIZAÇÃO DE DESLIGAMENTO"
+        ]) and "DISPENSA" not in nome_etapa and "MANOBRAR" not in nome_etapa
 
         if eh_deslig or eh_aut:
             limite_desligamento = max(limite_desligamento, cron)
@@ -596,10 +601,13 @@ def _obter_limite_pre_desligamento(manobra_dados):
             if cron > 0:
                 cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
 
-    if limite_desligamento != -1:
+    if cron_primeiro_retorno != float('inf'):
+        limite_max_permitido = cron_primeiro_retorno - 1
+        if limite_desligamento != -1:
+            return min(limite_desligamento, limite_max_permitido)
+        return limite_max_permitido
+    elif limite_desligamento != -1:
         return limite_desligamento
-    elif cron_primeiro_retorno != float('inf'):
-        return cron_primeiro_retorno - 1
     return -1
 
 
@@ -1520,6 +1528,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     if len(s_val) < 3 or s_val.startswith('SEM'): return
                     encontrados = regex_alim_patt.findall(s_val)
                     for ea in encontrados:
+                        clean_cand = re.sub(r'[^A-Z0-9]', '', ea.strip())
+                        # Descarta códigos de macros (ex: MA09, MA31, MAA7, MAA8, MAB1)
+                        if re.match(r'^MA[A-Z0-9]{2,3}$', clean_cand):
+                            continue
                         m_n = re.match(r'^([A-Z]{3,4})\s*[-/]?\s*(\d{1,4})$', ea.strip())
                         if m_n:
                             alims_envolvidos.add(f"{m_n.group(1)} {m_n.group(2)}")
@@ -2312,7 +2324,13 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         is_ab = bool(macros_abertura.search(txt) or re.search(r'\bABRIR\b', txt))
                         is_fe = bool(macros_fechamento.search(txt) or re.search(r'\bFECHAR\b', txt))
             
-                        eh_pre_desligamento = (limite_cronologia_desligamento != -1) and (cron <= limite_cronologia_desligamento)
+                        nome_et_item = (
+                            str(mi.get('etapa_nome', '')) + ' ' + 
+                            str(mi.get('etapa_texto_header', '')) + ' ' + 
+                            str(mi.get('grupo_id', ''))
+                        ).upper()
+                        eh_retorno = any(w in nome_et_item for w in ["RELIGAMENTO", "RECOMPOSICAO", "RECOMPOSIÇÃO", "RESTABELECIMENTO"])
+                        eh_pre_desligamento = (not eh_retorno) and (limite_cronologia_desligamento != -1) and (cron <= limite_cronologia_desligamento)
             
                         if eh_pre_desligamento:
                             if is_ab:

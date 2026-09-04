@@ -260,3 +260,72 @@ def test_inferencia_posope_religador_22_359323_sem_gdis():
     assert posope == 'F'
 
 
+def test_manobra_transferencia_com_carga_e_desligamento_245643023():
+    """
+    Valida a manobra 245643023 onde há:
+    - Etapa 20: Transferência com carga para Gerador de MT (24-99839 abre, 28-233097 fecha)
+    - Etapa 30: Desligamento do trecho de obra (28-99605 abre)
+    - Etapa 40: Religamento pós-obra (28-99605 fecha)
+    - Etapa 50: Recomposição da transferência (28-233097 abre, 24-99839 fecha)
+    Garante que:
+    1. O limite pré-desligamento é 11 (fim da etapa 30, antes da etapa 40).
+    2. Nenhuma reversão prematura pré-desligamento é falsamente apontada.
+    """
+    from src.core.conferidor_manobras import _obter_limite_pre_desligamento
+    import re
+
+    manobra_dados = [
+        # Etapa 10
+        {'cronologia': 1, 'etapa_nome': '10 VERIFICACAO PELO COD MVDU105', 'texto_linha': '10 MA09 MVDU105'},
+        {'cronologia': 2, 'etapa_nome': '10 VERIFICACAO PELO COD MVDU105', 'texto_linha': '20 MA09 MZLU006'},
+        # Etapa 20: Transferência prévia com carga
+        {'cronologia': 3, 'etapa_nome': '20 MANOBRA PELO TECNICO MVDU105', 'texto_linha': '10 MAA7 - SOLICITAR AO COD AUTORIZACAO PARA MANOBRAR MVDU'},
+        {'cronologia': 4, 'etapa_nome': '20 MANOBRA PELO TECNICO MVDU105', 'equipamento': '24 - 99839', 'texto_linha': '20 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 24 - 99839'},
+        {'cronologia': 5, 'etapa_nome': '20 MANOBRA PELO TECNICO MVDU105', 'equipamento': '28 - 233097', 'texto_linha': '30 MA02 - FECHAR EQUIPAMENTO 28 - 233097 MANY001'},
+        {'cronologia': 6, 'etapa_nome': '20 MANOBRA PELO TECNICO MVDU105', 'texto_linha': '40 MAA8 - INFORMAR AO COD MANOBRA REALIZADA MVDU'},
+        # Etapa 30: Desligamento
+        {'cronologia': 7, 'etapa_nome': '30 DESLIGAMENTO MVDU105', 'texto_linha': '10 MA40 - SOLICITAR AO COD AUTORIZACAO PARA DESLIGAMENTO MVDU'},
+        {'cronologia': 8, 'etapa_nome': '30 DESLIGAMENTO MVDU105', 'equipamento': '22 - 137584', 'texto_linha': '20 MA64 - COLOCAR CONTROLE DO EQUIPAMENTO EM MODO LOCAL 22 - 137584'},
+        {'cronologia': 9, 'etapa_nome': '30 DESLIGAMENTO MVDU105', 'equipamento': '22 - 137584', 'texto_linha': '30 MA06 - VERIFICAR EQUIPAMENTO ABERTO E SINALIZAR 22 - 137584'},
+        {'cronologia': 10, 'etapa_nome': '30 DESLIGAMENTO MVDU105', 'equipamento': '28 - 99605', 'texto_linha': '40 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 28 - 99605'},
+        {'cronologia': 11, 'etapa_nome': '30 DESLIGAMENTO MVDU105', 'texto_linha': '50 MA42 - TESTAR E ATERRAR OS CIRCUITOS MVDU'},
+        # Etapa 40: Religamento
+        {'cronologia': 12, 'etapa_nome': '40 RELIGAMENTO MVDU105', 'texto_linha': '10 MA43 - RETIRAR ATERRAMENTO DOS CIRCUITOS MVDU'},
+        {'cronologia': 13, 'etapa_nome': '40 RELIGAMENTO MVDU105', 'equipamento': '28 - 99605', 'texto_linha': '20 MA66 - RETIRAR SINALIZACAO E FECHAR EQUIPAMENTO 28 - 99605'},
+        {'cronologia': 14, 'etapa_nome': '40 RELIGAMENTO MVDU105', 'equipamento': '22 - 137584', 'texto_linha': '30 MA07 - RETIRAR PLACA NAO OPERE DO EQUIPAMENTO 22 - 137584'},
+        {'cronologia': 15, 'etapa_nome': '40 RELIGAMENTO MVDU105', 'equipamento': '22 - 137584', 'texto_linha': '40 MA65 - COLOCAR CONTROLE DO EQUIPAMENTO EM MODO REMOTO 22 - 137584'},
+        {'cronologia': 16, 'etapa_nome': '40 RELIGAMENTO MVDU105', 'texto_linha': '50 MA41 - INFORMAR AO COD RELIGAMENTO COM HORARIO MVDU'},
+        # Etapa 50: Normalização da transferência
+        {'cronologia': 17, 'etapa_nome': '50 MANOBRA PELO TECNICO MVDU105', 'texto_linha': '10 MAA7 - SOLICITAR AO COD AUTORIZACAO PARA MANOBRAR MVDU'},
+        {'cronologia': 18, 'etapa_nome': '50 MANOBRA PELO TECNICO MVDU105', 'equipamento': '28 - 233097', 'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 28 - 233097 MANY001'},
+        {'cronologia': 19, 'etapa_nome': '50 MANOBRA PELO TECNICO MVDU105', 'equipamento': '24 - 99839', 'texto_linha': '30 MA66 - RETIRAR SINALIZACAO E FECHAR EQUIPAMENTO 24 - 99839'},
+        {'cronologia': 20, 'etapa_nome': '50 MANOBRA PELO TECNICO MVDU105', 'texto_linha': '40 MAA8 - INFORMAR AO COD MANOBRA REALIZADA MVDU'}
+    ]
+
+    limite_cronologia = _obter_limite_pre_desligamento(manobra_dados)
+    # Limite pré-desligamento deve ser o fim da etapa 30 (cronologia 11), sem estender para as etapas 40 e 50
+    assert limite_cronologia == 11
+
+    # Valida que nenhum dos 3 equipamentos tem bate-volta pré-desligamento
+    macros_ab = re.compile(r'\b\d*(MA01|MA31|MA30|MA18|MA22|MA24|MA54|MA56|MAA9)\b(?!\s*-\s*OUTROS)')
+    macros_fe = re.compile(r'\b\d*(MA02|MA66|MA67|MA19|MA23|MA25|MA55|MA57|MAB1)\b(?!\s*-\s*OUTROS)')
+
+    for eq_test in ['24 - 99839', '28 - 233097', '28 - 99605']:
+        itens_eq = [mi for mi in manobra_dados if mi.get('equipamento') == eq_test]
+        hist_pre = []
+        for mi in itens_eq:
+            cron = mi['cronologia']
+            nome_et = mi.get('etapa_nome', '').upper()
+            eh_retorno = any(w in nome_et for w in ["RELIGAMENTO", "RECOMPOSICAO", "RECOMPOSIÇÃO", "RESTABELECIMENTO"])
+            if (not eh_retorno) and (limite_cronologia != -1) and (cron <= limite_cronologia):
+                txt = mi['texto_linha'].upper()
+                if macros_ab.search(txt) or 'ABRIR' in txt:
+                    hist_pre.append((mi['etapa_nome'], 'ABRIR'))
+                elif macros_fe.search(txt) or 'FECHAR' in txt:
+                    hist_pre.append((mi['etapa_nome'], 'FECHAR'))
+
+        # Cada equipamento teve no máximo 1 ação na fase pré-desligamento (sem reversão prematura)
+        assert len(hist_pre) <= 1, f"Equipamento {eq_test} não deve ter mais de 1 ação pré-desligamento: {hist_pre}"
+
+
+
