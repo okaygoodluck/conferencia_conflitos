@@ -1937,7 +1937,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 # REGRA 29 (Verificação de Anormalidade por Alimentador)
                 contagem_alim = {}
                 verificacao_cod_ma09 = set()
-                alimentadores_isentos = set()
+                alimentadores_isentos = {}  # Guarda alimentador -> motivo ("GERADOR DE BT", "GERADOR DE MT", "DISJUNTOR DE INTERLIGACAO")
                 for mi in manobra_dados:
                     alim = mi.get('alimentador', '').strip()
                     eq = mi.get('equipamento', '').strip()
@@ -1964,19 +1964,24 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     ob = mi.get('observacao', '')
                     execut_cod = mi.get('executor', '')
         
-                    # Checar se é uma etapa de MANOBRA PELO TÉCNICO com comentário de GERADOR ou DISJUNTOR DE INTERLIGAÇÃO
-                    txt_completo_item = f"{et} {tx} {ob} {eq}".upper()
-                    txt_sem_acento = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], txt_completo_item)
+                    # Checar se o item específico possui comentário de GERADOR ou DISJUNTOR DE INTERLIGAÇÃO (tolerante a variações/erros de digitação)
+                    # Não inclui o cabeçalho da etapa (et) aqui para evitar que siglas globais como 'GBT:2' classifiquem o alimentador do sistema como gerador
+                    txt_proprio_item = f"{tx} {ob} {eq}".upper()
+                    txt_sem_acento = re.sub(r'[ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ]', lambda m: 'AAAAAEEEEIIIIOOOOOUUUU'['ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜ'.find(m.group(0))], txt_proprio_item)
         
-                    is_manobra_tecnico = "MANOBRA PELO TECNICO" in txt_sem_acento
-                    tem_isencao_gerador = any(termo in txt_sem_acento for termo in [
-                        "GERADOR DE BT",
-                        "GERADOR DE MT",
-                        "DISJUNTOR DE INTERLIGACAO"
-                    ])
+                    motivo_isencao = None
+                    if "GERADOR DE BT" in txt_sem_acento or re.search(r'\bGERADOR\b.*\bBT\b', txt_sem_acento):
+                        motivo_isencao = "GERADOR DE BT"
+                    elif "GERADOR DE MT" in txt_sem_acento or re.search(r'\bGERADOR\b.*\bMT\b', txt_sem_acento):
+                        motivo_isencao = "GERADOR DE MT"
+                    elif re.search(r'\bDISJUNTOR\s+DE\s+INT?ERLIGA[CÇ][AÃ]O\b', txt_sem_acento) or "INTELIGACAO" in txt_sem_acento or "INTERLIGACAO" in txt_sem_acento:
+                        motivo_isencao = "DISJUNTOR DE INTERLIGACAO"
+                    elif "GERADOR" in txt_sem_acento or "UGTM" in txt_sem_acento:
+                        motivo_isencao = "GERADOR DE BT"
         
-                    if is_manobra_tecnico and tem_isencao_gerador and eff_alim:
-                        alimentadores_isentos.add(eff_alim)
+                    if motivo_isencao and eff_alim:
+                        if eff_alim not in alimentadores_isentos:
+                            alimentadores_isentos[eff_alim] = motivo_isencao
             
                     is_cod_executando = bool(re.search(r'\bCOD\b', execut_cod, re.IGNORECASE)) or bool(re.search(r'\bVERIFICA[CÇ]?[AÃ]?O\s*(?:PELO|DO|DA)?\s*COD\b', et + " " + tx + " " + ob, re.IGNORECASE))
                     if is_cod_executando and re.search(r'\b\d*MA09\b', tx + " " + ob, re.IGNORECASE):
@@ -1985,11 +1990,24 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         else:
                             print_regra(29, "ALERTA", "Linha com MA09 pelo COD: Campo 'Alimentador' está vazio. Preencha o alimentador correspondente.")
 
+                # Remove de alimentadores_isentos qualquer alimentador que realizou verificação MA09 pelo COD
+                for a in list(alimentadores_isentos.keys()):
+                    if a in verificacao_cod_ma09:
+                        del alimentadores_isentos[a]
+
+                # Exibe ALERTA informando sobre os alimentadores de Gerador ou Disjuntor de Interligação
+                for a, mot in sorted(alimentadores_isentos.items()):
+                    print_regra(29, "ALERTA", f"Alimentador '{a}': Circuito de '{mot}'. Isento da verificação de anormalidade (MA09) pelo COD.")
+
                 falhas_r29 = [f"Alimentador '{a}': Manobra iniciada sem a ação MA09 (Verificação de Anormalidade) pelo COD. Insira a macro MA09." for a, c in contagem_alim.items() if a not in verificacao_cod_ma09 and a not in alimentadores_isentos]
                 if falhas_r29:
                     print_regra(29, "ERRO", falhas_r29)
                 elif contagem_alim:
-                    print_regra(29, "OK", "Todos os alimentadores envolvidos possuem a verificação MA09 vinculada ao COD (ou são isentos por se tratarem de Geradores/Interligação de SE fictícia).")
+                    alims_reais_cod = [a for a in contagem_alim if a in verificacao_cod_ma09]
+                    if alims_reais_cod:
+                        print_regra(29, "OK", f"Alimentador(es) do sistema ({', '.join(sorted(alims_reais_cod))}) com ação MA09 confirmada pelo COD.")
+                    else:
+                        print_regra(29, "OK", "Todos os alimentadores envolvidos possuem a verificação MA09 vinculada ao COD (ou são isentos por se tratarem de Geradores/Interligação de SE fictícia).")
 
                 print("\n=== FASE: Cruzamento com a Solicitação (Fase 3) ===")
                 if not sol_locais:
@@ -3270,28 +3288,80 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         eq_ab = ab['eq']
                         cron_ab = ab['cron']
                         et_ab = ab['etapa']
-            
+                        mi_ab = ab['mi']
+                        txt_ab = mi_ab.get('texto_linha', '').upper()
+                        obs_ab = mi_ab.get('observacao', '').upper()
+                        texto_completo_ab = f"{eq_ab} {obs_ab} {txt_ab}"
+
+                        # 1. Reconhecimento de equipamento de fronteira/delimitador da solicitação
+                        # Verifica pelo número normalizado ou pelos dígitos presentes no equipamento ou observação (ex: TRAFO 778899 - 3 - 45)
                         is_solicitacao_boundary = any(_norm_eqpto(eq_ab) == _norm_eqpto(sol_eq) for sol_eq in sol_dict.keys())
                         if not is_solicitacao_boundary:
-                            digits_ab = set(re.findall(r'\b\d{5,7}\b', eq_ab))
+                            digits_ab = set(re.findall(r'\b\d{4,7}\b', texto_completo_ab))
                             if digits_ab:
                                 for sol_eq in sol_dict.keys():
-                                    digits_sol = set(re.findall(r'\b\d{5,7}\b', sol_eq))
+                                    digits_sol = set(re.findall(r'\b\d{4,7}\b', sol_eq))
                                     if digits_ab & digits_sol:
                                         is_solicitacao_boundary = True
                                         break
-                        if not is_solicitacao_boundary and any(m in txt for m in ["MAB6", "MA88", "MAB7", "MA90"]):
+                        if not is_solicitacao_boundary and any(m in txt_ab for m in ["MAB6", "MA88", "MAB7", "MA90"]):
                             is_solicitacao_boundary = True
-            
+
                         fechamentos_previos = [fe for fe in fechamentos_tensao if fe['cron'] <= cron_ab]
-            
+
                         if not is_solicitacao_boundary:
                             if not fechamentos_previos:
                                 fechamento_posterior = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
                                 if fechamento_posterior:
                                     fe_post = fechamento_posterior[0]
+                                    mi_fe = fe_post['mi']
+                                    txt_fe = mi_fe.get('texto_linha', '').upper()
+                                    obs_fe = mi_fe.get('observacao', '').upper()
+                                    texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
+
+                                    # 2. Contexto de GERADOR / GBT / GMT / UGTM:
+                                    # Em alimentação provisória com gerador, por norma estrita de segurança operacional
+                                    # e proteção humana, DEVE-SE abrir a fonte da rede (trafo) antes de fechar a chave
+                                    # do gerador (evita retorno de tensão perigoso para o primário e paralelismo fora de fase).
+                                    contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
+                                                           for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+
+                                    # 3. Critério ANEEL (PRODIST Módulo 8) e Operação COM CARGA no mesmo horário:
+                                    # Interrupções transitórias inferiores a 3 minutos (<= 2:59) são consideradas
+                                    # manobras de transferência momentânea (pique operacional) e não corte sustentado.
+                                    # Se a abertura e o fechamento do socorro ocorrem dentro do mesmo horário programado
+                                    # (mesmo minuto) ou na mesma etapa operacional sequencial com carga, a interrupção
+                                    # é imediata entre a abertura e o fechamento, não caracterizando corte indevido de clientes.
+                                    dt_ab = (mi_ab.get('data_hora') or '').strip()
+                                    dt_fe = (mi_fe.get('data_hora') or '').strip()
+                                    header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
+                                    header_fe = (mi_fe.get('etapa_texto_header') or '').strip()
+
+                                    m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_ab or header_ab)
+                                    m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_fe or header_fe)
+                                    hora_ab = m_dt_ab.group(0) if m_dt_ab else ""
+                                    hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
+
+                                    mesmo_horario = False
+                                    if hora_ab and hora_fe and (hora_ab == hora_fe):
+                                        mesmo_horario = True
+                                    elif mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id'):
+                                        mesmo_horario = True
+                                    elif et_ab == fe_post['etapa']:
+                                        mesmo_horario = True
+
+                                    ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
+
+                                    if contexto_gerador:
+                                        # Manobra com gerador: sequência ABRIR trafo -> FECHAR gerador é a correta.
+                                        continue
+
+                                    if mesmo_horario or ambos_com_carga:
+                                        # Manobra sequencial transitória no mesmo horário/etapa (pique < 3 min ANEEL).
+                                        continue
+
                                     falhas_r31b.append(
-                                        f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}) ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}). Isso provoca pique/corte não programado de clientes."
+                                        f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}, horário '{hora_ab or dt_ab}') ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}, horário '{hora_fe or dt_fe}'). Intervalo de tempo entre etapas provoca corte/desligamento não programado de clientes."
                                     )
                                 else:
                                     falhas_r31b.append(

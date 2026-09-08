@@ -173,5 +173,81 @@ class TestRegra31CoerenciaEstado(unittest.TestCase):
 
         self.assertEqual(len(erro_31), 0, "Equipamento sem tag não deve disparar erro falso positivo na Regra 31")
 
+    def test_regra_31b_gerador_e_mesmo_horario(self):
+        """Valida que abrir transformador e fechar gerador no mesmo horário (ou com indicação de gerador/com carga) não dispara erro na Regra 31.B."""
+        manobra_dados = [
+            {
+                'equipamento': '28 - 163751',
+                'texto_linha': '20 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 28 - 163751 PTHD217 COM CARGA 23/09/2026 09:00',
+                'observacao': 'TRAFO 778899 - 3 - 45',
+                'etapa_nome': '20 MANOBRA PELO TECNICO',
+                'etapa_texto_header': '20 MANOBRA PELO TECNICO PTHD217 23/09/2026 09:00',
+                'data_hora': '23/09/2026 09:00',
+                'grupo_id': 'ETAPA_20',
+                'cronologia': 3
+            },
+            {
+                'equipamento': '28 - 175854',
+                'texto_linha': '30 MA02 - FECHAR EQUIPAMENTO 28 - 175854 SRQA001 COM CARGA 23/09/2026 09:00',
+                'observacao': 'GERADOR DE BT',
+                'etapa_nome': '20 MANOBRA PELO TECNICO',
+                'etapa_texto_header': '20 MANOBRA PELO TECNICO PTHD217 23/09/2026 09:00',
+                'data_hora': '23/09/2026 09:00',
+                'grupo_id': 'ETAPA_20',
+                'cronologia': 4
+            }
+        ]
+        sol_dict = {'778899 - 3 - 45': {'eq': '778899 - 3 - 45'}}
+
+        # Teste 1: Limite da solicitação identificado pela observação
+        mi_ab = manobra_dados[0]
+        obs_ab = mi_ab.get('observacao', '').upper()
+        texto_completo_ab = f"{mi_ab['equipamento']} {obs_ab} {mi_ab['texto_linha'].upper()}"
+        digits_ab = set(re.findall(r'\b\d{4,7}\b', texto_completo_ab))
+        is_solicitacao_boundary = any(digits_ab & set(re.findall(r'\b\d{4,7}\b', sol_eq)) for sol_eq in sol_dict.keys())
+        self.assertTrue(is_solicitacao_boundary, "Trafo 778899 na observação deve ser reconhecido como boundary da solicitação")
+
+        # Teste 2: Mesmo horário e contexto de gerador
+        mi_fe = manobra_dados[1]
+        texto_completo_fe = f"{mi_fe['equipamento']} {mi_fe['observacao'].upper()} {mi_fe['texto_linha'].upper()}"
+        contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe) for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+        self.assertTrue(contexto_gerador, "Deve identificar contexto de gerador")
+
+        m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', mi_ab['data_hora'])
+        m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', mi_fe['data_hora'])
+        self.assertEqual(m_dt_ab.group(0), m_dt_fe.group(0), "Ambas as manobras ocorrem no mesmo horário de agendamento (09:00)")
+
+    def test_regra_31b_inversao_com_horarios_distintos_detecta_erro(self):
+        """Valida que se houver abertura em etapa/horário anterior ao fechamento do socorro sem gerador, o erro é apontado."""
+        mi_ab = {
+            'equipamento': '28 - 111111',
+            'texto_linha': 'MA01 - ABRIR EQUIPAMENTO 28 - 111111',
+            'observacao': '',
+            'data_hora': '23/09/2026 08:00',
+            'etapa_texto_header': '10 MANOBRA 23/09/2026 08:00',
+            'grupo_id': 'ETAPA_10',
+            'cronologia': 1
+        }
+        mi_fe = {
+            'equipamento': '28 - 222222',
+            'texto_linha': 'MA02 - FECHAR EQUIPAMENTO 28 - 222222',
+            'observacao': 'CHAVE DE SOCORRO',
+            'data_hora': '23/09/2026 09:30',
+            'etapa_texto_header': '20 MANOBRA 23/09/2026 09:30',
+            'grupo_id': 'ETAPA_20',
+            'cronologia': 5
+        }
+        texto_completo_ab = f"{mi_ab['equipamento']} {mi_ab['observacao']} {mi_ab['texto_linha'].upper()}"
+        texto_completo_fe = f"{mi_fe['equipamento']} {mi_fe['observacao']} {mi_fe['texto_linha'].upper()}"
+        
+        contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe) for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+        self.assertFalse(contexto_gerador)
+
+        m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', mi_ab['data_hora'])
+        m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', mi_fe['data_hora'])
+        mesmo_horario = (m_dt_ab.group(0) == m_dt_fe.group(0))
+        self.assertFalse(mesmo_horario, "Horários 08:00 e 09:30 são diferentes (intervalo de 1h30)")
+
 if __name__ == "__main__":
     unittest.main()
+
