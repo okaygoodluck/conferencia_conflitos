@@ -2832,12 +2832,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         
                     passou_deslig = False
                     teve_rastreio_inversa = False
+                    operacoes_sem_tensao = []
 
                     for mi in manobra_items:
                         etapa_txt = (mi.get('etapa_nome', '') + ' ' + mi.get('etapa_texto_header', '')).upper()
                         if "DESLIGAMENTO" in etapa_txt: passou_deslig = True
             
                         txt = mi['texto_linha'].upper()
+                        obs = mi.get('observacao', '').upper()
             
                         # Contagem para validação cronológica (Fase PRE e POST)
                         for m_lock in counts_bloqueios.keys():
@@ -2850,6 +2852,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             # não constituem transferências provisórias e não exigem inversão dentro da manobra.
                             is_sem_tensao = any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
                             if nome_grupo == "Abertura Simples (MA01/MA02)" and is_sem_tensao:
+                                for m_ab in aberturas:
+                                    if re.search(_re_macro(m_ab), txt):
+                                        operacoes_sem_tensao.append("Abertura")
+                                for m_fe in fechamentos:
+                                    if re.search(_re_macro(m_fe), txt):
+                                        operacoes_sem_tensao.append("Fechamento")
                                 continue
 
                             for m_ab in aberturas:
@@ -2889,10 +2897,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     if falhas_r22_list:
                         str_falhas = " | ".join(sorted(set(falhas_r22_list)))
                         print_regra(22, "ERRO", f"Equipamento '{eq}': Divergência na reversão/normalização de macros ({str_falhas}). Insira as macros inversas.")
-                    elif teve_rastreio_inversa:
-                        print_regra(22, "OK", f"Equilíbrio de ações e cronologia de bloqueios validados em '{eq}'.")
                     else:
-                        pass  # IGNORADA silenciosa
+                        if operacoes_sem_tensao:
+                            ops_str = "/".join(sorted(set(operacoes_sem_tensao)))
+                            print_regra(22, "ALERTA", f"Equipamento '{eq}': Operação de {ops_str} executada SEM TENSÃO (alteração definitiva de topologia da rede/obra sem reversão na manobra).")
+                        if teve_rastreio_inversa:
+                            print_regra(22, "OK", f"Equilíbrio de ações e cronologia de bloqueios validados em '{eq}'.")
 
                     # REGRA 30 (Ordem Cronológica de Ações)
                     saldos_crono = {k: 0 for k in rastreamento_inversas}

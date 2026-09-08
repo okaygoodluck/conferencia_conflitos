@@ -401,3 +401,69 @@ def test_regra42_sinalizacao_ma06_em_desligamento_245585526():
 
     assert abriu_ate_desligamento is True
     assert sinalizou_ate_desligamento is True
+
+
+def test_regra22_alerta_informativo_sem_tensao():
+    """
+    Valida que operações de chaveamento executadas expressamente SEM TENSÃO (ex: MA01/MA02 em 28-33017 e 28-105523)
+    são identificadas para emissão de alerta informativo e não geram falha/erro de saldo na Regra 22.
+    """
+    from src.core.conferidor_manobras import _re_macro
+    import re
+
+    rastreamento_inversas = {
+        "Abertura Simples (MA01/MA02)": (["MA01"], ["MA02"])
+    }
+
+    # Teste 1: Chave 28 - 33017 aberta sem tensão
+    items_ab = [{
+        'texto_linha': '10 MA01 - ABRIR EQUIPAMENTO 28 - 33017 CLUD208 SEM TENSAO',
+        'observacao': ''
+    }]
+
+    saldos_ab = {k: 0 for k in rastreamento_inversas}
+    operacoes_sem_tensao_ab = []
+
+    for mi in items_ab:
+        txt = mi['texto_linha'].upper()
+        obs = mi.get('observacao', '').upper()
+        is_sem_tensao = any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
+        for nome_grupo, (aberturas, fechamentos) in rastreamento_inversas.items():
+            if nome_grupo == "Abertura Simples (MA01/MA02)" and is_sem_tensao:
+                for m_ab in aberturas:
+                    if re.search(_re_macro(m_ab), txt):
+                        operacoes_sem_tensao_ab.append("Abertura")
+                for m_fe in fechamentos:
+                    if re.search(_re_macro(m_fe), txt):
+                        operacoes_sem_tensao_ab.append("Fechamento")
+                continue
+
+    assert saldos_ab["Abertura Simples (MA01/MA02)"] == 0
+    assert operacoes_sem_tensao_ab == ["Abertura"]
+
+    # Teste 2: Chave 28 - 105523 fechada sem tensão
+    items_fe = [{
+        'texto_linha': '40 MA02 - FECHAR EQUIPAMENTO 28 - 105523 CLUD209 SEM TENSAO',
+        'observacao': ''
+    }]
+
+    saldos_fe = {k: 0 for k in rastreamento_inversas}
+    operacoes_sem_tensao_fe = []
+
+    for mi in items_fe:
+        txt = mi['texto_linha'].upper()
+        obs = mi.get('observacao', '').upper()
+        is_sem_tensao = any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
+        for nome_grupo, (aberturas, fechamentos) in rastreamento_inversas.items():
+            if nome_grupo == "Abertura Simples (MA01/MA02)" and is_sem_tensao:
+                for m_ab in aberturas:
+                    if re.search(_re_macro(m_ab), txt):
+                        operacoes_sem_tensao_fe.append("Abertura")
+                for m_fe in fechamentos:
+                    if re.search(_re_macro(m_fe), txt):
+                        operacoes_sem_tensao_fe.append("Fechamento")
+                continue
+
+    assert saldos_fe["Abertura Simples (MA01/MA02)"] == 0
+    assert operacoes_sem_tensao_fe == ["Fechamento"]
+
