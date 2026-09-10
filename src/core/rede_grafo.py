@@ -205,6 +205,8 @@ class RedeGrafoAlimentador:
         """
         Calcula o componente/zona a jusante (lado de carga) de um Regulador de Tensão
         no fluxo radial normal a partir da subestação (root) usando a topologia física.
+        Utiliza árvore radial com penalidade em chaves abertas (posope=='A') para evitar
+        fugas através de malhas/anéis e garantir determinação correta do sentido fonte -> carga.
         """
         ids = self.obter_ids_por_numeq(reg_numeq_ou_id)
         if not ids and reg_numeq_ou_id in self.id_to_no:
@@ -217,25 +219,22 @@ class RedeGrafoAlimentador:
             return set()
 
         try:
-            caminho_normal = nx.shortest_path(self.G_fisico, self.root_id, reg_id)
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
-            return set()
+            G_w = self.G_fisico.copy()
+            for u, v in G_w.edges():
+                no_u = self.id_to_no.get(u, {})
+                no_v = self.id_to_no.get(v, {})
+                is_na = (str(no_u.get("posope") or "").upper() in ["A", "ABERTO", "NA"] or
+                         str(no_u.get("posope_norm") or "").upper() == "A" or
+                         str(no_v.get("posope") or "").upper() in ["A", "ABERTO", "NA"] or
+                         str(no_v.get("posope_norm") or "").upper() == "A")
+                G_w[u][v]["weight"] = 10000 if is_na else 1
 
-        if len(caminho_normal) < 2:
-            return set()
-
-        vizinho_montante = caminho_normal[-2]
-
-        # Corta a aresta montante do regulador para isolar o componente jusante no grafo físico
-        G_cortado = self.G_fisico.copy()
-        if G_cortado.has_edge(vizinho_montante, reg_id):
-            G_cortado.remove_edge(vizinho_montante, reg_id)
-
-        try:
-            comp_jusante = set(nx.node_connected_component(G_cortado, reg_id))
+            paths = nx.single_source_dijkstra_path(G_w, self.root_id, weight="weight")
+            comp_jusante = {x for x, path in paths.items() if reg_id in path}
+            comp_jusante.add(reg_id)
             return comp_jusante
         except Exception:
-            return set()
+            return {reg_id}
 
     def obter_religadores_trifasicos_no_ciclo(self, chave_numeq_ou_id: str,
                                               abertas_adicionais: Optional[Set[str]] = None,

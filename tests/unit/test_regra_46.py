@@ -280,6 +280,41 @@ class TestRegra46(unittest.TestCase):
         self.assertEqual(len(res["reguladores_invertidos"]), 0)
         self.assertEqual(len(res["rt_sem_ma35_ou_ma77"]), 0)
 
+    def test_regra_46_rt_lado_fonte_socorrido_mesmo_sentido_sem_inversao(self):
+        """
+        Cenário da Manobra 245818305 (PMSU23):
+        Chave de tronco (55323) é aberta e chave de socorro (55288) é fechada no mesmo nó de junção.
+        Os reguladores a jusante da junção continuam recebendo fluxo no mesmo sentido (Fonte -> Carga).
+        Apenas a fonte foi alterada, sem inversão de fluxo.
+        """
+        dados = {
+            "alimentador": "PMSU23",
+            "root": {"id": "ROOT_PMSU23", "refalm": "PMSU23"},
+            "nos": [
+                {"id": "ROOT_PMSU23", "numeq": "PMSU23", "tipono": "alimentador", "posope": "F"},
+                {"id": "CH_TRONCO", "numeq": "28 - 55323", "tipono": "CH Faca", "tipoeq": "28", "posope": "F"},
+                {"id": "JUNCAO", "numeq": "PONTO_JUNCAO", "tipono": "barra", "posope": "F"},
+                {"id": "CH_SOCORRO", "numeq": "28 - 55288", "tipono": "CH Faca", "tipoeq": "28", "posope": "A", "alm_outro_circuito": "PMSU24"},
+                {"id": "RT_1", "numeq": "55295", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "pelf": "1", "pelc": "2"},
+                {"id": "RT_2", "numeq": "171172", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "pelf": "1", "pelc": "2"},
+            ],
+            "arestas": [
+                {"id": "ROOT_PMSU23*CH_TRONCO"},
+                {"id": "CH_TRONCO*JUNCAO"},
+                {"id": "CH_SOCORRO*JUNCAO"},
+                {"id": "JUNCAO*RT_1"},
+                {"id": "JUNCAO*RT_2"},
+            ]
+        }
+        g = RedeGrafoAlimentador(dados)
+        manobra = [
+            {"equipamento": "28 - 55288", "alim": "PMSU24", "texto_linha": "MA02 - FECHAR EQUIPAMENTO 28 - 55288", "etapa_nome": "30 MANOBRA"},
+            {"equipamento": "28 - 55323", "alim": "PMSU23", "texto_linha": "MA31 - ABRIR E SINALIZAR EQUIPAMENTO 28 - 55323", "etapa_nome": "30 MANOBRA"},
+        ]
+        res = g.simular_manobra(manobra)
+        self.assertEqual(len(res["reguladores_invertidos"]), 0)
+        self.assertEqual(len(res["rt_sem_ma35_ou_ma77"]), 0)
+
 if __name__ == "__main__":
     unittest.main()
 
