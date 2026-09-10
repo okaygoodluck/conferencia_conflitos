@@ -204,7 +204,7 @@ class RedeGrafoAlimentador:
     def obter_zona_jusante_regulador(self, reg_numeq_ou_id: str) -> Set[str]:
         """
         Calcula o componente/zona a jusante (lado de carga) de um Regulador de Tensão
-        no fluxo radial normal a partir da subestação (root).
+        no fluxo radial normal a partir da subestação (root) usando a topologia física.
         """
         ids = self.obter_ids_por_numeq(reg_numeq_ou_id)
         if not ids and reg_numeq_ou_id in self.id_to_no:
@@ -213,13 +213,11 @@ class RedeGrafoAlimentador:
             return set()
 
         reg_id = ids[0]
-        G_cond = self.obter_grafo_condutor()
-
-        if not self.root_id or not G_cond.has_node(self.root_id) or not G_cond.has_node(reg_id):
+        if not self.root_id or not self.G_fisico.has_node(self.root_id) or not self.G_fisico.has_node(reg_id):
             return set()
 
         try:
-            caminho_normal = nx.shortest_path(G_cond, self.root_id, reg_id)
+            caminho_normal = nx.shortest_path(self.G_fisico, self.root_id, reg_id)
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return set()
 
@@ -228,8 +226,8 @@ class RedeGrafoAlimentador:
 
         vizinho_montante = caminho_normal[-2]
 
-        # Corta a aresta montante do regulador para isolar o componente jusante
-        G_cortado = G_cond.copy()
+        # Corta a aresta montante do regulador para isolar o componente jusante no grafo físico
+        G_cortado = self.G_fisico.copy()
         if G_cortado.has_edge(vizinho_montante, reg_id):
             G_cortado.remove_edge(vizinho_montante, reg_id)
 
@@ -347,8 +345,11 @@ class RedeGrafoAlimentador:
 
         abertas_puro = {_extrair_id_puro(c) for c in abertas_total if _extrair_id_puro(c)}
 
-        # Grafo condutor elétrico considerando equipamentos abertos e o fechamento da chave
-        G_cond = self.obter_grafo_condutor(chaves_abertas_adicionais=abertas_total)
+        # Grafo condutor elétrico considerando equipamentos abertos (sem a chave que está sendo fechada)
+        G_cond_sem_chave = self.obter_grafo_condutor(chaves_abertas_adicionais=abertas_total)
+
+        # Grafo condutor elétrico COM a chave que está sendo fechada
+        G_cond = G_cond_sem_chave.copy()
         for v in vizinhos_chave:
             G_cond.add_edge(nid_chave, v)
 
@@ -368,8 +369,10 @@ class RedeGrafoAlimentador:
             if not comp_jusante:
                 continue
 
-            # Se a chave que está sendo fechada conecta diretamente na zona a jusante do regulador:
+            # Se a chave que está sendo fechada conecta na zona a jusante do regulador:
             conecta_jusante = (nid_chave in comp_jusante) or any(v in comp_jusante for v in vizinhos_chave)
+            if not conecta_jusante:
+                continue
 
             # Só há fluxo reverso se houver continuidade elétrica ativa (caminho condutor) entre a chave e o regulador
             tem_caminho_eletrico = False
@@ -382,12 +385,51 @@ class RedeGrafoAlimentador:
             if not tem_caminho_eletrico:
                 continue
 
-            if outro_circuito and conecta_jusante:
-                # Chave de socorro externo injetando tensão na jusante do regulador
+            # 1. Obter vizinho a montante do regulador no caminho radial normal a partir da SE
+            vizinho_montante = None
+            if self.root_id and self.G_fisico.has_node(self.root_id) and self.G_fisico.has_node(reg_id):
+                try:
+                    caminho_normal = nx.shortest_path(self.G_fisico, self.root_id, reg_id)
+                    if len(caminho_normal) >= 2:
+                        vizinho_montante = caminho_normal[-2]
+                except Exception:
+                    pass
+
+            # REGRA FUNDAMENTAL DE FLUXO DIRETO vs INVERSO:
+            # Se o regulador está conectado à subestação (root) no grafo condutor antes do fechamento:
+            tem_caminho_se = False
+            if self.root_id and G_cond_sem_chave.has_node(self.root_id) and G_cond_sem_chave.has_node(reg_id):
+                try:
+                    tem_caminho_se = nx.has_path(G_cond_sem_chave, self.root_id, reg_id)
+                except Exception:
+                    tem_caminho_se = False
+
+            if tem_caminho_se:
+                # O regulador está energizado por sua própria SE.
+                # Para haver alimentação reversa atingindo o lado de carga (jusante) do RT vinda da SE,
+                # deve haver um anel/loop condutor (com a chave fechada) ligando a SE até o RT SEM
+                # passar pelo seu lado fonte (vizinho_montante).
+                loop_atinge_jusante = False
+                if vizinho_montante and self.root_id:
+                    G_sem_fonte_rt = G_cond.copy()
+                    if G_sem_fonte_rt.has_edge(vizinho_montante, reg_id):
+                        G_sem_fonte_rt.remove_edge(vizinho_montante, reg_id)
+                    try:
+                        loop_atinge_jusante = nx.has_path(G_sem_fonte_rt, self.root_id, reg_id)
+                    except Exception:
+                        loop_atinge_jusante = False
+
+                if not loop_atinge_jusante:
+                    # Rede puramente radial ou chave de socorro sem retorno para a carga:
+                    # A potência flui da SE em direção à chave fechada (fluxo direto normal SE -> RT -> Chave).
+                    # O regulador está a montante da chave fechada, assumindo mais carga (não há inversão).
+                    continue
+
+            if outro_circuito:
+                # Chave de socorro externo injetando tensão na jusante do regulador isolado de sua SE
                 reguladores_invertidos.append(reg)
-            elif posope_orig == "A" and conecta_jusante:
+            elif posope_orig == "A":
                 # Chave NA interna estabelecendo alimentação reversa:
-                # Deve interligar um nó externo a comp_jusante para um nó dentro de comp_jusante
                 conecta_fora = (nid_chave not in comp_jusante) or any(v not in comp_jusante for v in vizinhos_chave)
                 if conecta_fora:
                     reguladores_invertidos.append(reg)

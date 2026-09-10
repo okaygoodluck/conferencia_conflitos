@@ -16,7 +16,7 @@ class TestRegra46(unittest.TestCase):
             "root": {"id": "ROOT_SE", "refalm": "ALIM_TESTE"},
             "nos": [
                 {"id": "ROOT_SE", "numeq": "ALIM_TESTE", "tipono": "alimentador", "posope": "F"},
-                {"id": "N1", "numeq": "CH10", "tipono": "CH Faca", "tipoeq": "28", "posope": "F", "r_fases": "ABC"},
+                {"id": "N1", "numeq": "CH10", "tipono": "CH Faca", "tipoeq": "28", "posope": "A", "r_fases": "ABC"},
                 {"id": "N2", "numeq": "RT50", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "r_fases": "ABC", "pelf": "1", "pelc": "2"},
                 {"id": "N3", "numeq": "CH60", "tipono": "Faca Unipolar", "tipoeq": "28", "posope": "A", "r_fases": "ABC", "alm_outro_circuito": "CIRCUITO_SOCORRO"},
             ],
@@ -251,6 +251,34 @@ class TestRegra46(unittest.TestCase):
             {"equipamento": "RT_B", "alim": "ALIM_B", "texto_linha": "MA31 ABRIR E SINALIZAR RT_B", "etapa_nome": "20 MANOBRA"},
         ])
         self.assertEqual(len(res_rt_aberto["reguladores_invertidos"]), 0)
+
+    def test_regra_46_rt_montante_chave_assumindo_carga_sem_falso_positivo(self):
+        """
+        Cenário da Manobra 245818305:
+        Reguladores a montante da chave que está sendo fechada (alimentados pela SE)
+        estão assumindo mais carga no sentido normal (direto).
+        Não devem ser apontados como fluxo invertido.
+        """
+        dados = {
+            "alimentador": "PMSU24",
+            "root": {"id": "ROOT_PMSU24", "refalm": "PMSU24"},
+            "nos": [
+                {"id": "ROOT_PMSU24", "numeq": "PMSU24", "tipono": "alimentador", "posope": "F"},
+                {"id": "N1", "numeq": "RT_188256", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "pelf": "1", "pelc": "2"},
+                {"id": "N2", "numeq": "28 - 55288", "tipono": "CH Faca", "tipoeq": "28", "posope": "A", "alm_outro_circuito": "PMSU23"},
+            ],
+            "arestas": [
+                {"id": "ROOT_PMSU24*N1"},
+                {"id": "N1*N2"}
+            ]
+        }
+        g = RedeGrafoAlimentador(dados)
+        manobra = [
+            {"equipamento": "28 - 55288", "alim": "PMSU24", "texto_linha": "MA02 - FECHAR EQUIPAMENTO 28 - 55288", "etapa_nome": "30 MANOBRA"}
+        ]
+        res = g.simular_manobra(manobra)
+        self.assertEqual(len(res["reguladores_invertidos"]), 0)
+        self.assertEqual(len(res["rt_sem_ma35_ou_ma77"]), 0)
 
 if __name__ == "__main__":
     unittest.main()

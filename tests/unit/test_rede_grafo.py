@@ -132,7 +132,7 @@ class TestRedeGrafo(unittest.TestCase):
             "root": {"id": "ROOT_SE", "refalm": "TEST01"},
             "nos": [
                 {"id": "ROOT_SE", "numeq": "TEST01", "tipono": "alimentador", "posope": "F"},
-                {"id": "N1", "numeq": "100", "tipono": "CH Faca", "tipoeq": "28", "posope": "F", "r_fases": "ABC"},
+                {"id": "N1", "numeq": "100", "tipono": "CH Faca", "tipoeq": "28", "posope": "A", "r_fases": "ABC"},
                 {"id": "N2", "numeq": "200", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "r_fases": "ABC"},
                 {"id": "N3", "numeq": "300", "tipono": "CH Faca", "tipoeq": "28", "posope": "A", "r_fases": "ABC", "alm_outro_circuito": "SOCORRO02"},
             ],
@@ -174,9 +174,13 @@ class TestRedeGrafo(unittest.TestCase):
         religs = grafo.obter_religadores_trifasicos_no_ciclo("79958")
         self.assertTrue(any(str(r.get("numeq")) == "281246" for r in religs))
 
-        # Chave 464974 inverte o Regulador 133136
-        rts_inv = grafo.detectar_reguladores_invertidos_por_fechamento("464974")
+        # Chave 464974 inverte o Regulador 133136 quando isolado da SE por abertura a montante
+        rts_inv = grafo.detectar_reguladores_invertidos_por_fechamento("464974", chaves_abertas_simuladas={"281147"})
         self.assertTrue(any(str(r.get("numeq")) == "133136" for r in rts_inv))
+
+        # Sem abertura a montante, 133136 está a montante de 464974 assumindo carga (não inverte)
+        rts_montante = grafo.detectar_reguladores_invertidos_por_fechamento("464974")
+        self.assertEqual(len(rts_montante), 0)
 
 if __name__ == "__main__":
     unittest.main()
