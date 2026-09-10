@@ -465,10 +465,32 @@ tr:hover td {
     gap: 8px;
     font-size: 13px;
     cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .checkitem input {
     accent-color: var(--primary);
+}
+
+.checkitem.highlight-divisa {
+    animation: pulseDivisa 1.2s ease-in-out;
+}
+
+@keyframes pulseDivisa {
+    0% {
+        background-color: rgba(16, 185, 129, 0.4);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+    }
+    50% {
+        background-color: rgba(16, 185, 129, 0.2);
+        box-shadow: 0 0 5px rgba(16, 185, 129, 0.25);
+    }
+    100% {
+        background-color: transparent;
+        box-shadow: none;
+    }
 }
 
 .summary-dashboard {

@@ -549,6 +549,11 @@ function toggleConsole(context, forceExpand = null, event = null) {
         }
     }
 
+    const label = document.getElementById('console-toggle-label');
+    if (label) {
+        label.textContent = shouldExpand ? 'Recolher' : 'Expandir';
+    }
+
     if (context) {
         switchConsoleView(context);
     }
@@ -570,6 +575,14 @@ function switchConsoleView(context, event = null) {
         });
     }
     if (tab) tab.classList.add('active');
+
+    // Se o usuário clicou explicitamente em uma aba e o terminal estiver recolhido, expande
+    if (event) {
+        const drawer = document.getElementById('console-drawer');
+        if (drawer && !drawer.classList.contains('expanded')) {
+            toggleConsole(context, true);
+        }
+    }
 }
 
 function clearConsole() {
@@ -646,7 +659,7 @@ async function startConflitos(e) {
     confCurrentEqpt = eqManual;
     confCurrentAlim = alManual;
 
-    const sit = Array.from(document.querySelectorAll('input[name="sit"]:checked')).map(x => x.value).join(',');
+    const sit = 'EB,EN,IN,CO,EA';
     const mal = Array.from(document.querySelectorAll('input[name="mal"]:checked')).map(x => x.value).join(',');
 
     const params = new URLSearchParams();
@@ -678,7 +691,7 @@ async function startConflitos(e) {
     document.getElementById('tbl-conf-body').innerHTML = "";
     document.getElementById('lnk-conf-export').style.display = 'none';
 
-    toggleConsole('conf', true);
+    switchConsoleView('conf');
 
     try {
         const res = await fetch('/conflitos/start', { method: 'POST', body: params });
@@ -1002,7 +1015,7 @@ async function startConferidorManobras(e) {
     document.getElementById('cm-summary-dash').innerHTML = '';
     document.getElementById('term-cm').textContent = "";
     
-    toggleConsole('cm', true);
+    switchConsoleView('cm');
 
     try {
         const res = await fetch('/conferidor_manobras/start', {
@@ -1340,12 +1353,55 @@ function buildPhaseCard(title, items) {
     `;
 }
 
+// --- AUTO-SELEÇÃO INTELIGENTE DE DIVISAS DE MALHAS ---
+const DIVISAS_MALHAS = {
+    'NT': ['TA', 'CN', 'LE'],             // Norte -> Triângulo, Centro e Leste
+    'TA': ['NT', 'CN', 'SU'],             // Triângulo -> Norte, Centro e Sul
+    'CN': ['NT', 'LE', 'MQ', 'SU', 'TA'], // Centro -> Todas
+    'LE': ['CN', 'NT', 'MQ'],             // Leste -> Centro, Norte e Mantiqueira
+    'MQ': ['CN', 'LE', 'SU'],             // Mantiqueira -> Centro, Leste e Sul
+    'SU': ['TA', 'CN', 'MQ']              // Sul -> Triângulo, Centro e Mantiqueira
+};
+
+function setupDivisasMalhas() {
+    const malhaInputs = document.querySelectorAll('input[name="mal"]');
+    const autoDivisasChk = document.getElementById('chk-auto-divisas');
+
+    malhaInputs.forEach(input => {
+        input.addEventListener('change', (e) => {
+            // Só dispara inclusão automática quando o usuário MARCA uma região
+            // Se o usuário DESMARCAR qualquer uma, ela permanece desmarcada
+            if (e.target.checked) {
+                const autoActive = !autoDivisasChk || autoDivisasChk.checked;
+                if (!autoActive) return;
+
+                const code = e.target.value;
+                const divisas = DIVISAS_MALHAS[code] || [];
+                divisas.forEach(divCode => {
+                    const targetCb = document.querySelector(`input[name="mal"][value="${divCode}"]`);
+                    if (targetCb && !targetCb.checked) {
+                        targetCb.checked = true;
+                        const label = targetCb.closest('.checkitem');
+                        if (label) {
+                            label.classList.add('highlight-divisa');
+                            setTimeout(() => label.classList.remove('highlight-divisa'), 1200);
+                        }
+                    }
+                });
+            }
+        });
+    });
+}
+
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', () => {
     setupCredentialSync();
     
     // Verifica sessão de Administrador armazenada
     checkAdminSession();
+
+    // Ativa a auto-seleção inteligente de divisas entre malhas
+    setupDivisasMalhas();
 
     const di = document.getElementById('conf-di');
     const df = document.getElementById('conf-df');

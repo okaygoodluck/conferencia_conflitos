@@ -203,6 +203,8 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 sit = [s.strip() for s in (body.get("situacoes") or "").split(",") if s.strip()]
+                if not sit:
+                    sit = ["EB", "EN", "IN", "CO", "EA"]
                 mal = [m.strip() for m in (body.get("malhas") or "").split(",") if m.strip()]
 
                 job_id = str(uuid.uuid4())

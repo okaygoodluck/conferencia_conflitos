@@ -12,9 +12,12 @@ from src.core import analisador_topologico
 SITUACOES_LABEL = {
     "EB": "ELABORADA",
     "EN": "ENVIADA PARA O CONDIS",
+    "IN": "INCOMPLETA",
     "CO": "COMPLETA",
     "EA": "EM ANALISE",
 }
+
+SITUACOES_PADRAO = list(SITUACOES_LABEL.keys())
 
 
 from datetime import date
@@ -219,7 +222,7 @@ def _fmt_seconds(seconds):
 def _parse_situacoes_env():
     raw = (os.getenv("GDIS_SITUACOES_PADRAO") or os.getenv("GDIS_SITUACOES") or "").strip()
     if not raw:
-        return ["EB", "EN"]
+        return ["EB", "EN", "IN", "CO", "EA"]
     parts = re.split(r"[,\s;]+", raw)
     out = []
     seen = set()
@@ -229,7 +232,7 @@ def _parse_situacoes_env():
             continue
         seen.add(s)
         out.append(s)
-    return out or ["EB", "EN"]
+    return out or ["EB", "EN", "IN", "CO", "EA"]
 
 
 def _normalize_situacoes(values):
@@ -242,6 +245,34 @@ def _normalize_situacoes(values):
         seen.add(s)
         out.append(s)
     return out
+
+
+DIVISAS_MALHAS = {
+    "NT": ["TA", "CN", "LE"],             # Norte -> Triângulo, Centro e Leste
+    "TA": ["NT", "CN", "SU"],             # Triângulo -> Norte, Centro e Sul
+    "CN": ["NT", "LE", "MQ", "SU", "TA"], # Centro -> Todos
+    "LE": ["CN", "NT", "MQ"],             # Leste -> Centro, Norte e Mantiqueira
+    "MQ": ["CN", "LE", "SU"],             # Mantiqueira -> Centro, Leste e Sul
+    "SU": ["TA", "CN", "MQ"],             # Sul -> Triângulo, Centro e Mantiqueira
+}
+
+
+def obter_divisas_malha(malha):
+    """Retorna as siglas das malhas vizinhas que fazem divisa com a malha informada."""
+    return list(DIVISAS_MALHAS.get((malha or "").strip().upper(), []))
+
+
+def expandir_malhas_com_divisas(malhas):
+    """Expande a lista de malhas incluindo automaticamente todas as suas divisas geográficas."""
+    out = set()
+    for m in malhas or []:
+        m_upper = (m or "").strip().upper()
+        if not m_upper:
+            continue
+        out.add(m_upper)
+        for div in DIVISAS_MALHAS.get(m_upper, []):
+            out.add(div)
+    return sorted(out)
 
 
 def _normalize_malhas(values):
@@ -405,7 +436,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
 
     situacoes = _normalize_situacoes(situacoes) if situacoes is not None else _parse_situacoes_env()
     if not situacoes:
-        situacoes = ["EB", "EN"]
+        situacoes = ["EB", "EN", "IN", "CO", "EA"]
     
     malhas = _normalize_malhas(malhas)
     if not malhas or malhas == [""]:

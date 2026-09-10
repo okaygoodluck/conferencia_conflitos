@@ -5,6 +5,21 @@ import time
 import json
 from playwright.sync_api import sync_playwright
 
+try:
+    from src.core.rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa
+except ImportError:
+    try:
+        from rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa
+    except ImportError:
+        RedeGrafoAlimentador = None
+        def _obter_nome_etapa(mi):
+            et = str(mi.get('etapa_nome') or mi.get('etapa_texto_header') or mi.get('etapa') or '').strip()
+            et = re.sub(r'^(?:etapa\s*:\s*)+', '', et, flags=re.IGNORECASE).strip()
+            if not et:
+                return 'Manobra'
+            m = re.search(r'^(.*?)\s+\d{2}/\d{2}/\d{4}', et)
+            return m.group(1).strip() if m else et
+
 class Colors:
     """Códigos de cores ANSI para o terminal"""
     RED = '\033[91m'
@@ -374,10 +389,49 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                 log_func(f"[GDIS Dinâmico] Fallback HTTP: {e_url}")
 
         if dados_json and isinstance(dados_json, dict) and dados_json.get("nos"):
+            # Se o ambiente operacao retornou poucos nós (< 20), tenta obter o cadastro completo no GDIS Apoio
+            if len(dados_json.get("nos", [])) < 20:
+                try:
+                    payload_cad = dict(payload)
+                    payload_cad["ambiente"] = "cadastro"
+                    resp_cad = context.request.post(url_rede, params=params, headers=headers, form=payload_cad, timeout=30000)
+                    if resp_cad.status == 200 and "cookiecheck" not in resp_cad.text():
+                        cad_json = resp_cad.json()
+                        if isinstance(cad_json, dict) and len(cad_json.get("nos", [])) > len(dados_json.get("nos", [])):
+                            dados_json = cad_json
+                            log_func(f"[GDIS Dinâmico] Topologia cadastral completa obtida para '{cand}': {len(dados_json.get('nos', []))} nós.")
+                except Exception:
+                    pass
             break
+
+    # Fallback local em C:\CEMIG\scada_dados\dados_ortogonal apenas se GDIS não retornou dados
+    if not dados_json or len(dados_json.get("nos", [])) == 0:
+        dir_local = r"C:\CEMIG\scada_dados\dados_ortogonal"
+        if os.path.exists(dir_local):
+            for fname in [f"REDE_{cod_clean}_cadastro.json", f"REDE_{cod_clean}.json"]:
+                fpath = os.path.join(dir_local, fname)
+                if os.path.exists(fpath):
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f_l:
+                            loc_data = json.load(f_l)
+                            if isinstance(loc_data, dict) and loc_data.get("nos"):
+                                dados_json = loc_data
+                                log_func(f"[GDIS Dinâmico] Fallback local: utilizando topologia de '{fname}' ({len(dados_json.get('nos', []))} nós).")
+                                break
+                    except Exception:
+                        pass
 
     if not dados_json or not isinstance(dados_json, dict) or "nos" not in dados_json:
         return {}
+
+    # Salva cópia em temp/ para rastreabilidade
+    try:
+        temp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        with open(os.path.join(temp_dir, f"topologia_{cod_clean}.json"), "w", encoding="utf-8") as f_tmp:
+            json.dump(dados_json, f_tmp, ensure_ascii=False)
+    except Exception:
+        pass
 
     nos = dados_json.get("nos", [])
     equipamentos = {}
@@ -449,6 +503,12 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                 equipamentos[k_pref] = []
             equipamentos[k_pref].append(rec)
 
+    if RedeGrafoAlimentador and dados_json and "nos" in dados_json and "arestas" in dados_json:
+        try:
+            equipamentos["__grafo__"] = RedeGrafoAlimentador(dados_json)
+        except Exception as e_gr:
+            log_func(f"[GDIS Dinâmico] Aviso ao inicializar grafo topológico: {e_gr}")
+
     log_func(f"[GDIS Dinâmico] Sucesso: {len(nos)} nós recebidos ({len(equipamentos)} equipamentos indexados) para '{cod_clean}'.")
     return equipamentos
 
@@ -500,6 +560,10 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
     """
     eq_clean = str(eq_nome or '').strip()
     prefixo = eq_clean.split('-')[0].strip() if '-' in eq_clean else ''
+
+    # Chaves manuais 28, 36, 37 JAMAIS são telecontroladas na rede de distribuição
+    if prefixo in ['28', '36', '37']:
+        return False
 
     # Se o equipamento é monofásico, não é telecontrolado na rede de distribuição
     fases = _obter_fases_equipamento(eq_nome, eq_data, manobra_items, sol_info)
@@ -560,6 +624,137 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
         return True
 
     return False
+
+
+def validar_regra_44(manobra_dados):
+    """
+    Valida a Regra 44 (Sequência de Manobra com Pique e Pique Risco Sistema, CP:xx, MA27 e MA79).
+    Retorna uma lista de strings contendo as falhas detectadas (vazia se OK).
+    """
+    falhas_r44 = []
+    macros_abertura_pique = re.compile(r'\b(MA01|MA31|MA30)\b(?!\s*-\s*OUTROS)')
+    macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
+
+    def _is_eq_telecontrolado(eq_nome, mi=None):
+        return _verificar_telecontrole(eq_nome, manobra_items=[mi] if mi else None)
+
+    etapas_pique = {}
+
+    for mi in manobra_dados:
+        hdr = str(mi.get('etapa_texto_header') or mi.get('etapa_nome') or mi.get('etapa') or '').strip()
+        hdr_upper = hdr.upper()
+        if "PIQUE" in hdr_upper:
+            m_num = re.search(r'^\s*(?:ETAPA\s*:?\s*)?(\d+)', hdr, re.IGNORECASE)
+            key = m_num.group(1) if m_num else hdr
+            if key not in etapas_pique:
+                etapas_pique[key] = []
+            etapas_pique[key].append(mi)
+
+    if not etapas_pique:
+        return falhas_r44
+
+    for grupo_id, itens_etapa in etapas_pique.items():
+        etapa_nome_real = _obter_nome_etapa(itens_etapa[0])
+        texto_cabecalho = " ".join([
+            str(itens_etapa[0].get('etapa_texto_header', '')),
+            str(itens_etapa[0].get('etapa_nome', '')),
+            str(itens_etapa[0].get('etapa', ''))
+        ]).upper()
+
+        # 1. VALIDAÇÃO DO CABEÇALHO: CP:xx - DADOS / VOZ / SATELITAL
+        match_cp = re.search(r'\bCP\s*:\s*(\d+)\s*(?:-\s*|\s+)(DADOS|VOZ|SATELITAL)\b', texto_cabecalho)
+        if not match_cp:
+            match_parcial = re.search(r'\bCP\s*:\s*(\d+)', texto_cabecalho)
+            if match_parcial:
+                cp_val_parcial = int(match_parcial.group(1))
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': Formato do canal no cabeçalho incorreto (CP:{cp_val_parcial}). Esperado: 'CP:{cp_val_parcial} - DADOS' (< 500) ou 'CP:{cp_val_parcial} - VOZ/SATELITAL' (>= 500).")
+            else:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': Obrigatório constar 'CP:xx - DADOS/VOZ/SATELITAL' no cabeçalho.")
+        else:
+            cp_val = int(match_cp.group(1))
+            cp_tipo = match_cp.group(2).upper()
+
+            if cp_val < 500 and cp_tipo != "DADOS":
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': CP:{cp_val} < 500 exige canal 'DADOS' (encontrado: '{cp_tipo}').")
+            elif cp_val >= 500 and cp_tipo not in ["VOZ", "SATELITAL"]:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': CP:{cp_val} >= 500 exige canal 'VOZ' ou 'SATELITAL' (encontrado: '{cp_tipo}').")
+
+        # 2. VALIDAÇÃO DA SEQUÊNCIA DE MANOBRA (ABERTURAS ANTES DE FECHAMENTOS)
+        itens_com_carga = []
+        for mi in itens_etapa:
+            txt_alvo = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
+            eq_nome = mi.get('equipamento', '') or mi.get('alimentador', '')
+            is_tele = _is_eq_telecontrolado(eq_nome, mi)
+
+            is_abertura = bool(macros_abertura_pique.search(txt_alvo))
+            is_fechamento = bool(macros_fechamento_pique.search(txt_alvo))
+
+            if is_abertura or is_fechamento:
+                itens_com_carga.append({
+                    'mi': mi,
+                    'eq': eq_nome,
+                    'txt': txt_alvo,
+                    'is_abrir': is_abertura,
+                    'is_fechar': is_fechamento,
+                    'is_tele': is_tele
+                })
+
+        if not itens_com_carga:
+            falhas_r44.append(f"Etapa '{etapa_nome_real}': Manobra com Pique sem nenhuma ação com Carga (MA01, MA02, MA31, MA66, MA30, MA67).")
+        else:
+            indices_abrir = [i for i, it in enumerate(itens_com_carga) if it['is_abrir']]
+            indices_fechar = [i for i, it in enumerate(itens_com_carga) if it['is_fechar']]
+
+            if not indices_abrir:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': Manobra com Pique exige ao menos uma ação de ABERTURA (MA01/MA31/MA30).")
+            if not indices_fechar:
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': Manobra com Pique exige ao menos uma ação de FECHAMENTO (MA02/MA66/MA67).")
+
+            if indices_abrir and indices_fechar and max(indices_abrir) > min(indices_fechar):
+                falhas_r44.append(f"Etapa '{etapa_nome_real}': Sequência irregular de Manobra com Pique (Todas as aberturas devem ser executadas ANTES de qualquer fechamento).")
+
+        # 3. VALIDAÇÃO DAS MACROS MA79 (Comunicação) E MA27 (Posicionamento da Região)
+        txt_etapa_todas = " ".join((mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper() for mi in itens_etapa)
+        tem_ma79_etapa = bool(re.search(r'\bMA79\b', txt_etapa_todas) or ("CONFIRMAR EQUIPAMENTO COMUNICANDO" in txt_etapa_todas))
+
+        has_tele = any(it['is_tele'] for it in itens_com_carga) or any(_is_eq_telecontrolado(mi.get('equipamento', '') or mi.get('alimentador', ''), mi) for mi in itens_etapa if (mi.get('equipamento') or '').strip())
+        if has_tele and not tem_ma79_etapa:
+            falhas_r44.append(f"Etapa '{etapa_nome_real}': Etapa de Manobra com Pique com equipamento telecontrolado exige a macro MA79 (Confirmar Equipamento Comunicando).")
+
+        # Coletar todas as macros presentes em toda a etapa por equipamento
+        macros_por_eq = {}
+        for mi in itens_etapa:
+            eq_k = _norm_eqpto(mi.get('equipamento', ''))
+            if eq_k:
+                if eq_k not in macros_por_eq:
+                    macros_por_eq[eq_k] = []
+                txt_line = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
+                macros_por_eq[eq_k].append(txt_line)
+
+        for item in itens_com_carga:
+            eq_nome = item['eq']
+            eq_k = _norm_eqpto(eq_nome)
+            is_tele = item['is_tele']
+            txt = item['txt']
+            mi_item = item['mi']
+            execut_item = mi_item.get('executor', '').upper()
+            is_execut_regiao = any(r in execut_item for r in ['REGIAO', 'REGIÃO', 'CAMPO', 'EQUIPE'])
+
+            txt_todas_eq = " ".join(macros_por_eq.get(eq_k, [txt]))
+            tem_ma27 = bool(re.search(r'\bMA27\b', txt_todas_eq) or ("POSICIONAR PARA MANOBRAR" in txt_todas_eq))
+
+            # Equipamento manual operado em campo exige posicionamento prévio (MA27)
+            if not is_tele:
+                if any(re.search(r'\b' + m + r'\b', txt) for m in ["MA01", "MA31", "MA02", "MA66"]):
+                    if not tem_ma27:
+                        falhas_r44.append(f"Etapa '{etapa_nome_real}': Equipamento manual '{eq_nome}' exige a macro MA27 (Posicionar para Manobrar).")
+            else:
+                # Se o telecontrolado for operado localmente pela Região com carga, também exige MA27
+                if is_execut_regiao and any(re.search(r'\b' + m + r'\b', txt) for m in ["MA01", "MA31", "MA02", "MA66"]):
+                    if not tem_ma27:
+                        falhas_r44.append(f"Etapa '{etapa_nome_real}': Operação local pela Região no equipamento '{eq_nome}' exige a macro MA27 antes da operação.")
+
+    return sorted(set(falhas_r44))
 
 
 def _obter_limite_pre_desligamento(manobra_dados):
@@ -1564,11 +1759,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 for eh in manobra_etapas_headers:
                     _registrar_alims(eh.get('texto', ''))
 
+                grafos_alimentadores = {}
                 if alims_envolvidos:
                     print(f"\n[GDIS Dinâmico] Identificado(s) {len(alims_envolvidos)} alimentador(es) na Manobra: {', '.join(sorted(alims_envolvidos))}")
                     for cod_alim in sorted(alims_envolvidos):
                         dados_dinamicos = _consultar_topologia_gdis(context, cod_alim, usuario, log_func=print)
                         if dados_dinamicos:
+                            if "__grafo__" in dados_dinamicos:
+                                grafos_alimentadores[cod_alim] = dados_dinamicos.pop("__grafo__")
                             for k, lista_recs in dados_dinamicos.items():
                                 dados_equipamentos[k] = lista_recs
 
@@ -3105,122 +3303,15 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                 # REGRA 44 (Sequência de Manobra com Pique e Pique Risco Sistema, CP:xx, MA27 e MA79)
                 print("\n=== FASE: Sequência Manobra com Pique (Regra 44) ===")
-                falhas_r44 = []
-    
-                macros_abertura_pique = re.compile(r'\b(MA01|MA31|MA30)\b(?!\s*-\s*OUTROS)')
-                macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
-    
-                def _is_eq_telecontrolado(eq_nome, mi=None):
-                    return _verificar_telecontrole(eq_nome, manobra_items=[mi] if mi else None)
-
-                # Agrupar itens por etapa para analisar a ordem
-                etapas_pique = {} # key: grupo_id, value: list of items
-    
-                for mi in manobra_dados:
-                    etapa_nome = mi.get('etapa_nome', '').upper()
-                    etapa_header = mi.get('etapa_texto_header', '').upper()
-                    if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
-                        grupo_id = mi.get('grupo_id', etapa_nome)
-                        if grupo_id not in etapas_pique:
-                            etapas_pique[grupo_id] = []
-                        etapas_pique[grupo_id].append(mi)
-            
-                if not etapas_pique:
+                tem_pique = any("PIQUE" in (str(mi.get('etapa_texto_header') or '') + " " + str(mi.get('etapa_nome') or '')).upper() for mi in manobra_dados)
+                if not tem_pique:
                     print_regra(44, "OK", "Nenhuma etapa de Manobra com Pique detectada.")
                 else:
-                    for grupo_id, itens_etapa in etapas_pique.items():
-                        etapa_nome_real = itens_etapa[0].get('etapa_nome', grupo_id)
-                        etapa_header_real = itens_etapa[0].get('etapa_texto_header', '')
-                        texto_cabecario = (etapa_header_real + " " + etapa_nome_real).upper()
-            
-                        # 1. VALIDAÇÃO DO CABEÇALHO: CP:xx - DADOS / VOZ / SATELITAL
-                        match_cp = re.search(r'\bCP\s*:\s*(\d+)\s*(?:-\s*|\s+)(DADOS|VOZ|SATELITAL)\b', texto_cabecario)
-                        if not match_cp:
-                            match_parcial = re.search(r'\bCP\s*:\s*(\d+)', texto_cabecario)
-                            if match_parcial:
-                                cp_val_parcial = int(match_parcial.group(1))
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': Formato do canal no cabeçalho incorreto (CP:{cp_val_parcial}). Esperado: 'CP:{cp_val_parcial} - DADOS' (< 500) ou 'CP:{cp_val_parcial} - VOZ/SATELITAL' (>= 500).")
-                            else:
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': Obrigatório constar 'CP:xx - DADOS/VOZ/SATELITAL' no cabeçalho.")
-                        else:
-                            cp_val = int(match_cp.group(1))
-                            cp_tipo = match_cp.group(2).upper()
-                
-                            if cp_val < 500 and cp_tipo != "DADOS":
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': CP:{cp_val} < 500 exige canal 'DADOS' (encontrado: '{cp_tipo}').")
-                            elif cp_val >= 500 and cp_tipo not in ["VOZ", "SATELITAL"]:
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': CP:{cp_val} >= 500 exige canal 'VOZ' ou 'SATELITAL' (encontrado: '{cp_tipo}').")
-            
-                        # 2. VALIDAÇÃO DAS MACROS MA27 e MA79 E DA SEQUÊNCIA DE MANOBRA
-                        itens_com_carga = []
-                        for mi in itens_etapa:
-                            txt_alvo = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
-                            eq_nome = mi.get('equipamento', '') or mi.get('alimentador', '')
-                            is_tele = _is_eq_telecontrolado(eq_nome, mi)
-                
-                            is_abertura = bool(macros_abertura_pique.search(txt_alvo))
-                            is_fechamento = bool(macros_fechamento_pique.search(txt_alvo))
-                
-                            if is_abertura or is_fechamento:
-                                itens_com_carga.append({
-                                    'mi': mi,
-                                    'eq': eq_nome,
-                                    'txt': txt_alvo,
-                                    'is_abrir': is_abertura,
-                                    'is_fechar': is_fechamento,
-                                    'is_tele': is_tele
-                                })
-            
-                        if not itens_com_carga:
-                            falhas_r44.append(f"Etapa '{etapa_nome_real}': Manobra com Pique sem nenhuma ação com Carga (MA01, MA02, MA31, MA66, MA30, MA67).")
-                        else:
-                            primeiro = itens_com_carga[0]
-                            if not primeiro['is_abrir']:
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': Primeiro equipamento operado ({primeiro['eq']}) deve ABRIR (MA01/MA31/MA30).")
-                
-                            if len(itens_com_carga) > 1:
-                                segundo = itens_com_carga[1]
-                                if not segundo['is_fechar']:
-                                    falhas_r44.append(f"Etapa '{etapa_nome_real}': Segundo equipamento operado ({segundo['eq']}) deve FECHAR (MA02/MA66/MA67).")
-                            else:
-                                falhas_r44.append(f"Etapa '{etapa_nome_real}': Encontrado apenas 1 equipamento com carga, exige o segundo para FECHAR.")
-
-                        # Coletar todas as macros presentes em toda a etapa por equipamento
-                        macros_por_eq = {}
-                        for mi in itens_etapa:
-                            eq_k = _norm_eqpto(mi.get('equipamento', ''))
-                            if eq_k:
-                                if eq_k not in macros_por_eq:
-                                    macros_por_eq[eq_k] = []
-                                txt_line = (mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper()
-                                macros_por_eq[eq_k].append(txt_line)
-            
-                        for item in itens_com_carga:
-                            eq_nome = item['eq']
-                            eq_k = _norm_eqpto(eq_nome)
-                            is_tele = item['is_tele']
-                            txt = item['txt']
-                
-                            txt_todas_eq = " ".join(macros_por_eq.get(eq_k, [txt]))
-                            tem_ma27 = bool(re.search(r'\bMA27\b', txt_todas_eq))
-                            tem_ma79 = bool(re.search(r'\bMA79\b', txt_todas_eq)) or ("CONFIRMAR EQUIPAMENTO COMUNICANDO" in txt_todas_eq)
-                
-                            if not is_tele:
-                                if any(re.search(r'\b' + m + r'\b', txt) for m in ["MA01", "MA31", "MA02", "MA66"]):
-                                    if not tem_ma27:
-                                        falhas_r44.append(f"Etapa '{etapa_nome_real}': Equipamento manual '{eq_nome}' exige a macro MA27.")
-                            else:
-                                if item['is_fechar'] and any(re.search(r'\b' + m + r'\b', txt) for m in ["MA02", "MA66"]):
-                                    if not tem_ma27:
-                                        falhas_r44.append(f"Etapa '{etapa_nome_real}': Fechamento do equipamento telecontrolado '{eq_nome}' exige a macro MA27 antes do fechamento.")
-                    
-                                if not tem_ma79:
-                                    falhas_r44.append(f"Etapa '{etapa_nome_real}': Equipamento telecontrolado '{eq_nome}' exige a macro MA79 antes da manobra.")
-
-                if falhas_r44:
-                    for f in set(falhas_r44): print_regra(44, "ERRO", f)
-                elif etapas_pique:
-                    print_regra(44, "OK", "Cabeçalho CP:xx, macros MA27/MA79 e sequência de Manobra com Pique validados com sucesso.")
+                    falhas_r44 = validar_regra_44(manobra_dados)
+                    if falhas_r44:
+                        for f in falhas_r44: print_regra(44, "ERRO", f)
+                    else:
+                        print_regra(44, "OK", "Cabeçalho CP:xx, macros MA27/MA79 e sequência de Manobra com Pique validados com sucesso.")
 
 
                 # REGRA 43 (Executor em Desligamento/Religamento)
@@ -3420,25 +3511,30 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             ma15_religadores.add(eq)
 
                 # 2. Verifica se há operação em anel/paralelo com tensão
-                # Requer etapa de MANOBRA (não desligamento/técnico) com sequência Fechamento (MA02/MA66) + Abertura (MA01/MA31) com tensão
+                # Requer etapa de MANOBRA (não desligamento/técnico/corte de carga/pique) com sequência Fechamento (MA02/MA66) + Abertura (MA01/MA31) com tensão
                 tem_fechamento_tensao = False
                 tem_abertura_tensao = False
                 etapa_anel = ""
 
                 for mi in manobra_dados:
-                    et_nome = (mi.get('etapa_nome', '') + " " + mi.get('etapa_texto_header', '')).upper()
-                    txt = mi.get('texto_linha', '').upper()
-                    obs = mi.get('observacao', '').upper()
+                    et_nome = (str(mi.get('etapa_nome', '')) + " " + str(mi.get('etapa_texto_header', ''))).upper()
+                    txt = str(mi.get('texto_linha', '')).upper()
+                    obs = str(mi.get('observacao', '')).upper()
         
-                    # Ignora etapas de Desligamento, Religamento, Preparação ou Manobra pelo Técnico
-                    is_etapa_desligada = any(x in et_nome for x in ["DESLIGAMENTO", "RELIGAMENTO", "PREPARACAO", "PREPARAÇÃO", "TECNICO", "TÉCNICO", "SEM TENSÃO", "SEM TENSAO"])
-                    is_linha_desligada = any(x in (txt + " " + obs) for x in ["SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO"])
+                    # Ignora etapas de Desligamento, Religamento, Preparação, Corte de Carga, Pique ou Sem Tensão
+                    is_etapa_desligada = any(x in et_nome for x in [
+                        "DESLIGAMENTO", "RELIGAMENTO", "PREPARACAO", "PREPARAÇÃO", "TECNICO", "TÉCNICO", 
+                        "SEM TENSÃO", "SEM TENSAO", "CORTE DE CARGA", "COM PIQUE", "MANOBRA COM PIQUE"
+                    ])
+                    is_linha_desligada = any(x in (txt + " " + obs) for x in [
+                        "SEM TENSÃO", "SEM TENSAO", "DESENERGIZADO", "CORTE DE CARGA", "COM PIQUE"
+                    ])
         
                     if not is_etapa_desligada and not is_linha_desligada:
                         # Fechamento com tensão em anel/paralelo/interligação
                         if (re.search(r'\b\d*(MA02|MA66)\b', txt) or "FECHAR EM PARALELO" in txt or "FECHAR EM ANEL" in txt) and any(k in (txt + " " + obs + " " + et_nome) for k in ["PARALELO COM TENSÃO", "FECHAR EM PARALELO", "LOOP DE TENSÃO", "ANEL COM TENSÃO"]):
                             tem_fechamento_tensao = True
-                            if not etapa_anel: etapa_anel = mi.get('etapa_nome', 'Itens')
+                            if not etapa_anel: etapa_anel = mi.get('etapa_nome') or mi.get('etapa_texto_header', 'Itens')
             
                         # Abertura com tensão
                         if (re.search(r'\b\d*(MA01|MA31)\b', txt) or "ABRIR" in txt) and not any(k in (txt + " " + obs) for k in ["SEM TENSÃO", "SEM TENSAO"]):
@@ -3446,17 +3542,83 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                 operacao_anel_com_tensao = tem_fechamento_tensao and tem_abertura_tensao
 
-                if operacao_anel_com_tensao and religadores_trifasicos:
-                    for r_eq in religadores_trifasicos:
-                        if r_eq not in ma15_religadores:
-                            falhas_r45.append(f"Etapa '{etapa_anel}': Operação em anel/paralelo com tensão exige bloqueio prévio de ST (MA15) no Religador Trifásico '{r_eq}'. Insira a macro MA15.")
+                # Integração com o Grafo Topológico GDIS (Regra 45)
+                if grafos_alimentadores:
+                    for cod_a, grafo in grafos_alimentadores.items():
+                        sim_g = grafo.simular_manobra(manobra_dados)
+                        if sim_g.get("loops_detectados"):
+                            operacao_anel_com_tensao = True
+                        for r_sem_ma15 in sim_g.get("religadores_anel_sem_ma15", []):
+                            et = r_sem_ma15.get('etapa', '')
+                            ch = r_sem_ma15.get('chave_fechada', '')
+                            r_num = r_sem_ma15.get('religador', '')
+                            msg = f"Operação em anel/paralelo com tensão (fechamento da chave '{ch}') exige bloqueio prévio de ST (MA15) no Religador Trifásico '{r_num}'. Insira a macro MA15."
+                            if et:
+                                msg = f"Etapa '{et}': {msg}"
+                            falhas_r45.append(msg)
+                else:
+                    # Fallback textual apenas se não houver grafo GDIS e houver confirmação de operação em anel com tensão
+                    if operacao_anel_com_tensao and religadores_trifasicos:
+                        for r_eq in religadores_trifasicos:
+                            if r_eq not in ma15_religadores:
+                                msg = f"Operação em anel/paralelo com tensão exige bloqueio prévio de ST (MA15) no Religador Trifásico '{r_eq}'. Insira a macro MA15."
+                                if etapa_anel:
+                                    msg = f"Etapa '{etapa_anel}': {msg}"
+                                falhas_r45.append(msg)
 
                 if falhas_r45:
-                    for f in set(falhas_r45): print_regra(45, "ERRO", f)
-                elif operacao_anel_com_tensao and religadores_trifasicos:
+                    for f in sorted(set(falhas_r45)): print_regra(45, "ERRO", f)
+                elif operacao_anel_com_tensao:
                     print_regra(45, "OK", "Bloqueio de ST (MA15) validado em todos os religadores trifásicos envolvidos na operação em anel com tensão.")
                 else:
-                    print_regra(45, "OK", "Operação em anel/paralelo com tensão não identificada ou sem restrições de ST.")
+                    print_regra(45, "OK", "Operação em anel/paralelo com tensão não identificada ou manobra realizada com corte de carga/pique.")
+
+                # REGRA 46 (Inversão de Fluxo em Reguladores de Tensão - Exigência de MA35/MA77 e MA36)
+                print("\n=== FASE: Proteção de Reguladores de Tensão Invertidos (Regra 46) ===")
+                falhas_r46_pre = {}  # rt_num -> item
+                falhas_r46_ret = {}  # rt_num -> item
+                rts_envolvidos = set()
+
+                if grafos_alimentadores:
+                    for cod_a, grafo in grafos_alimentadores.items():
+                        sim_g = grafo.simular_manobra(manobra_dados)
+                        for r_inv in sim_g.get("reguladores_invertidos", []):
+                            rts_envolvidos.add(r_inv.get("regulador"))
+
+                        for r_sem_pre in sim_g.get("rt_sem_ma35_ou_ma77", []):
+                            rt_k = str(r_sem_pre.get("regulador"))
+                            if rt_k not in falhas_r46_pre:
+                                falhas_r46_pre[rt_k] = r_sem_pre
+
+                        for r_sem_ret in sim_g.get("rt_sem_ma36_retorno", []):
+                            rt_k = str(r_sem_ret.get("regulador"))
+                            if rt_k not in falhas_r46_ret:
+                                falhas_r46_ret[rt_k] = r_sem_ret
+
+                falhas_r46 = []
+                for rt_k, r_sem_pre in sorted(falhas_r46_pre.items()):
+                    et = r_sem_pre.get('etapa', '')
+                    ch = r_sem_pre.get('chave_fechada', '')
+                    msg = f"Regulador de Tensão '{rt_k}' terá fluxo invertido após fechamento da chave '{ch}'. É obrigatório executar MA35 (Colocar no Neutro) ou MA77 (Fixar Tap) antes da reversão."
+                    if et:
+                        msg = f"Etapa '{et}': {msg}"
+                    falhas_r46.append(msg)
+
+                for rt_k, r_sem_ret in sorted(falhas_r46_ret.items()):
+                    et = r_sem_ret.get('etapa_inversao', '')
+                    msg = f"Regulador de Tensão '{rt_k}' teve fluxo invertido"
+                    if et:
+                        msg += f" na etapa '{et}'"
+                    msg += " e requer MA36 (Ligar Caixa de Comando e Colocar RT em Serviço) na etapa de recomposição/normalização."
+                    falhas_r46.append(msg)
+
+                if falhas_r46:
+                    for f in falhas_r46:
+                        print_regra(46, "ERRO", f)
+                elif rts_envolvidos:
+                    print_regra(46, "OK", "Reguladores de Tensão verificados: todas as inversões de fluxo possuem tratamento prévio (MA35/MA77) e recomposição (MA36).")
+                else:
+                    print_regra(46, "OK", "Circuito sem Reguladores de Tensão ou sem ocorrência de fluxo invertido.")
 
                 # ============================================================
                 # FIM DA VERIFICAÇÃO

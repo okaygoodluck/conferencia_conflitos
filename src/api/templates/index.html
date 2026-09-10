@@ -105,33 +105,26 @@
                                 </div>
 
                                 <div class="field col-12">
-                                    <label>Situações</label>
-                                    <div class="checkgrid">
-                                        <label class="checkitem"><input type="checkbox" name="sit" value="EB" checked>
-                                            EB</label>
-                                        <label class="checkitem"><input type="checkbox" name="sit" value="EN" checked>
-                                            EN</label>
-                                        <label class="checkitem"><input type="checkbox" name="sit" value="CO">
-                                            CO</label>
-                                        <label class="checkitem"><input type="checkbox" name="sit" value="EA">
-                                            EA</label>
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                        <label style="margin: 0;">Malhas</label>
+                                        <label style="font-size: 11px; font-weight: 500; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 6px;" title="Ao marcar uma malha, seleciona automaticamente suas regiões vizinhas de divisa">
+                                            <input type="checkbox" id="chk-auto-divisas" checked style="accent-color: var(--accent); cursor: pointer;">
+                                            ⚡ Auto-marcar divisas
+                                        </label>
                                     </div>
-                                </div>
-                                <div class="field col-12">
-                                    <label>Malhas</label>
                                     <div class="checkgrid">
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="CN">
-                                            Centro</label>
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="LE">
-                                            Leste</label>
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="MQ">
-                                            Mantiqueira</label>
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="NT">
+                                        <label class="checkitem" title="Divisas: Triângulo, Centro e Leste"><input type="checkbox" name="mal" value="NT">
                                             Norte</label>
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="SU">
-                                            Sul</label>
-                                        <label class="checkitem"><input type="checkbox" name="mal" value="TA">
+                                        <label class="checkitem" title="Divisas: Norte, Centro e Sul"><input type="checkbox" name="mal" value="TA">
                                             Triângulo</label>
+                                        <label class="checkitem" title="Divisas: Todas as regiões"><input type="checkbox" name="mal" value="CN">
+                                            Centro</label>
+                                        <label class="checkitem" title="Divisas: Centro, Norte e Mantiqueira"><input type="checkbox" name="mal" value="LE">
+                                            Leste</label>
+                                        <label class="checkitem" title="Divisas: Centro, Leste e Sul"><input type="checkbox" name="mal" value="MQ">
+                                            Mantiqueira</label>
+                                        <label class="checkitem" title="Divisas: Triângulo, Centro e Mantiqueira"><input type="checkbox" name="mal" value="SU">
+                                            Sul</label>
                                     </div>
                                 </div>
                             </div>
@@ -363,7 +356,7 @@
 
         <!-- CONSOLE DRAWER -->
         <div id="console-drawer" class="console-drawer">
-            <div class="console-header">
+            <div class="console-header" onclick="toggleConsole(null, null, event)" style="cursor: pointer;">
                 <div class="console-tabs">
                     <div id="tab-hub" class="console-tab" onclick="switchConsoleView('hub', event)">
                         <i data-lucide="server"></i>
@@ -380,7 +373,7 @@
                 </div>
                 <div class="console-controls" onclick="toggleConsole(null, null, event)">
                     <span style="font-size: 10px; opacity: 0.5; text-transform: uppercase; margin-right: 10px;"
-                        class="hide-mobile">Expandir</span>
+                        class="hide-mobile" id="console-toggle-label">Expandir</span>
                     <i data-lucide="chevron-up" id="console-toggle-icon"></i>
                 </div>
             </div>
