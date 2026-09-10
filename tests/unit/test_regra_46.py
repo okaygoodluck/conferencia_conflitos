@@ -107,9 +107,9 @@ class TestRegra46(unittest.TestCase):
 
         grafo = RedeGrafoAlimentador(dados)
         manobra = [
-            {"equipamento": "22 - 346798", "texto_linha": "MA01 - ABRIR EQUIPAMENTO COM CARGA", "etapa_nome": "20 MANOBRA"},
-            {"equipamento": "28 - 448117", "texto_linha": "MA31 - ABRIR E SINALIZAR COM CARGA", "etapa_nome": "20 MANOBRA"},
-            {"equipamento": "22 - 320996", "texto_linha": "MA02 - FECHAR EQUIPAMENTO COM CARGA", "etapa_nome": "20 MANOBRA"}
+            {"equipamento": "22 - 346798", "alim": "UHTM030", "texto_linha": "MA01 - ABRIR EQUIPAMENTO COM CARGA", "etapa_nome": "20 MANOBRA"},
+            {"equipamento": "28 - 448117", "alim": "UHTM030", "texto_linha": "MA31 - ABRIR E SINALIZAR COM CARGA", "etapa_nome": "20 MANOBRA"},
+            {"equipamento": "22 - 320996", "alim": "JPIQ403", "texto_linha": "MA02 - FECHAR EQUIPAMENTO COM CARGA", "etapa_nome": "20 MANOBRA"}
         ]
         res = grafo.simular_manobra(manobra)
         regs_inv = [r["regulador"] for r in res["reguladores_invertidos"]]

@@ -311,14 +311,6 @@ class RedeGrafoAlimentador:
         alm_outro = str(no_chave.get("alm_outro_circuito") or no_chave.get("alm_outro_circuito_cod") or "").strip()
         outro_circuito = bool(alm_outro)
 
-        # 0. Se for chave de socorro para outro circuito (outro_circuito == True):
-        # Se a manobra/item pertencer ao outro circuito e não a este, este alimentador (self)
-        # é o DOADOR da carga. A potência sai de self em direção ao outro circuito,
-        # operando todos os equipamentos de self em fluxo direto normal (SE -> Socorro).
-        if outro_circuito and alim_item:
-            if _alim_compativel(alim_item, alm_outro) and not _alim_compativel(alim_item, self.cod_alim):
-                return []
-
         # 1. Chaves que retornam ao seu estado normal (Religamento / Recomposição / Normalização):
         # Se a chave era normalmente fechada (posope_orig == 'F') e não conecta a outro circuito,
         # o seu fechamento apenas recompõe/restaura o fluxo radial normal vindo da subestação.
