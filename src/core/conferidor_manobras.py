@@ -6,12 +6,20 @@ import json
 from playwright.sync_api import sync_playwright
 
 try:
-    from src.core.rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa
+    from src.core.rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa, _norm_alim, _alim_compativel
 except ImportError:
     try:
-        from rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa
+        from rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa, _norm_alim, _alim_compativel
     except ImportError:
         RedeGrafoAlimentador = None
+        def _norm_alim(s: str) -> str:
+            if not s: return ""
+            s_clean = re.sub(r'[\s\-_]+', '', str(s)).upper()
+            m = re.match(r'^([A-Z]+)0*(\d+)$', s_clean)
+            return f"{m.group(1)}{m.group(2)}" if m else s_clean
+        def _alim_compativel(a1: str, a2: str) -> bool:
+            if not a1 or not a2: return False
+            return _norm_alim(a1) == _norm_alim(a2)
         def _obter_nome_etapa(mi):
             et = str(mi.get('etapa_nome') or mi.get('etapa_texto_header') or mi.get('etapa') or '').strip()
             et = re.sub(r'^(?:etapa\s*:\s*)+', '', et, flags=re.IGNORECASE).strip()
@@ -221,12 +229,12 @@ def _get_eq_data(dados, eq, alim1, alim2="", local=""):
         for item in lista:
             alims_item = item.get('alimentadores') or [item.get('alimentador')]
             for alim_orig in alims_item:
-                if _norm(alim_orig) == a1: return item
+                if _alim_compativel(alim_orig, alim1) or _norm(alim_orig) == a1: return item
     if a2:
         for item in lista:
             alims_item = item.get('alimentadores') or [item.get('alimentador')]
             for alim_orig in alims_item:
-                if _norm(alim_orig) == a2: return item
+                if _alim_compativel(alim_orig, alim2) or _norm(alim_orig) == a2: return item
             
     # Último caso: Retorna o primeiro da lista de candidatos detectados
     return lista[0]
@@ -1766,7 +1774,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         dados_dinamicos = _consultar_topologia_gdis(context, cod_alim, usuario, log_func=print)
                         if dados_dinamicos:
                             if "__grafo__" in dados_dinamicos:
-                                grafos_alimentadores[cod_alim] = dados_dinamicos.pop("__grafo__")
+                                g_obj = dados_dinamicos.pop("__grafo__")
+                                grafos_alimentadores[cod_alim] = g_obj
+                                grafos_alimentadores[_norm_alim(cod_alim)] = g_obj
+                                if hasattr(g_obj, 'cod_alim') and g_obj.cod_alim:
+                                    grafos_alimentadores[g_obj.cod_alim] = g_obj
+                                    grafos_alimentadores[_norm_alim(g_obj.cod_alim)] = g_obj
                             for k, lista_recs in dados_dinamicos.items():
                                 dados_equipamentos[k] = lista_recs
 
@@ -2417,7 +2430,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                     origem_cadastro = eq_data.get('origem', '')
                     alims_cad = [str(a).upper() for a in eq_data.get('alimentadores', [])]
-                    divergencia_circuito = bool(alim_manobra and alims_cad and not any(alim_manobra.upper() in a for a in alims_cad))
+                    divergencia_circuito = bool(alim_manobra and alims_cad and not any(_alim_compativel(alim_manobra, a) or alim_manobra.upper() in a for a in alims_cad))
 
                     # Regra de Ouro da Topologia Operacional:
                     # Se um equipamento é FECHADO no início da manobra e posteriormente ABERTO na recomposição,
@@ -3400,7 +3413,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                         fechamentos_previos = [fe for fe in fechamentos_tensao if fe['cron'] <= cron_ab]
 
-                        if not is_solicitacao_boundary:
+                        eh_etapa_desligamento = any(w in et_ab.upper() for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"])
+                        eh_transferencia_ativa = bool(fechamentos_previos) or (not eh_etapa_desligamento and not is_solicitacao_boundary)
+
+                        if not is_solicitacao_boundary or eh_transferencia_ativa:
                             if not fechamentos_previos:
                                 fechamento_posterior = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
                                 if fechamento_posterior:
@@ -3411,18 +3427,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                     texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
 
                                     # 2. Contexto de GERADOR / GBT / GMT / UGTM:
-                                    # Em alimentação provisória com gerador, por norma estrita de segurança operacional
-                                    # e proteção humana, DEVE-SE abrir a fonte da rede (trafo) antes de fechar a chave
-                                    # do gerador (evita retorno de tensão perigoso para o primário e paralelismo fora de fase).
                                     contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
                                                            for k in ["GERADOR", "GBT", "GMT", "UGTM"])
 
                                     # 3. Critério ANEEL (PRODIST Módulo 8) e Operação COM CARGA no mesmo horário:
-                                    # Interrupções transitórias inferiores a 3 minutos (<= 2:59) são consideradas
-                                    # manobras de transferência momentânea (pique operacional) e não corte sustentado.
-                                    # Se a abertura e o fechamento do socorro ocorrem dentro do mesmo horário programado
-                                    # (mesmo minuto) ou na mesma etapa operacional sequencial com carga, a interrupção
-                                    # é imediata entre a abertura e o fechamento, não caracterizando corte indevido de clientes.
                                     dt_ab = (mi_ab.get('data_hora') or '').strip()
                                     dt_fe = (mi_fe.get('data_hora') or '').strip()
                                     header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
@@ -3444,11 +3452,9 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                     ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
 
                                     if contexto_gerador:
-                                        # Manobra com gerador: sequência ABRIR trafo -> FECHAR gerador é a correta.
                                         continue
 
                                     if mesmo_horario or ambos_com_carga:
-                                        # Manobra sequencial transitória no mesmo horário/etapa (pique < 3 min ANEEL).
                                         continue
 
                                     falhas_r31b.append(
@@ -3458,6 +3464,30 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                     falhas_r31b.append(
                                         f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
                                     )
+                            else:
+                                # HOUVE FECHAMENTO PRÉVIO: Validação Topológica da Transferência de Carga!
+                                chaves_fechadas_nomes = [fe['eq'] for fe in fechamentos_previos]
+                                grafo_cand = None
+                                alim_ab = mi_ab.get('alim') or mi_ab.get('alimentador') or ''
+                                if grafos_alimentadores:
+                                    if alim_ab:
+                                        grafo_cand = grafos_alimentadores.get(alim_ab) or grafos_alimentadores.get(_norm_alim(alim_ab))
+                                    if not grafo_cand:
+                                        for g_k, g_v in grafos_alimentadores.items():
+                                            if hasattr(g_v, 'obter_ids_por_numeq') and g_v.obter_ids_por_numeq(eq_ab):
+                                                grafo_cand = g_v
+                                                break
+
+                                if grafo_cand and hasattr(grafo_cand, 'validar_transferencia_carga'):
+                                    res_transf = grafo_cand.validar_transferencia_carga(chaves_fechadas_nomes, eq_ab)
+                                    if not res_transf.get("valido", True):
+                                        total_j = res_transf.get("total_jusante", 0)
+                                        ch_sug = res_transf.get("chaves_sugeridas", [])
+                                        sug_txt = f" Chave(s) NA indicada(s) para socorro deste trecho: {', '.join(ch_sug)}." if ch_sug else ""
+                                        fe_nomes_str = ', '.join([f"'{c}'" for c in chaves_fechadas_nomes])
+                                        falhas_r31b.append(
+                                            f"Transferência de carga inválida com tensão no equipamento '{eq_ab}' na {et_ab}: a chave fechada {fe_nomes_str} não conecta à zona a jusante ({total_j} equipamentos/clientes ficariam sem tensão, provocando desligamento indevido de clientes).{sug_txt}"
+                                        )
 
                 if falhas_r31b:
                     for f in set(falhas_r31b):

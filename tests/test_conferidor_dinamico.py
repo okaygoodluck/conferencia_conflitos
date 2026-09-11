@@ -467,3 +467,58 @@ def test_regra22_alerta_informativo_sem_tensao():
     assert saldos_fe["Abertura Simples (MA01/MA02)"] == 0
     assert operacoes_sem_tensao_fe == ["Fechamento"]
 
+
+def test_normalizacao_e_compatibilidade_alimentadores():
+    from src.core.rede_grafo import _norm_alim, _alim_compativel
+
+    assert _norm_alim("JUAU 033") == "JUAU33"
+    assert _norm_alim("JUAU033") == "JUAU33"
+    assert _norm_alim("JUAU-033") == "JUAU33"
+    assert _norm_alim("JUAU33") == "JUAU33"
+    assert _norm_alim("MZLU 006") == "MZLU6"
+    assert _norm_alim("PTHD 218") == "PTHD218"
+
+    assert _alim_compativel("JUAU033", "JUAU33") is True
+    assert _alim_compativel("JUAU 033", "JUAU-33") is True
+    assert _alim_compativel("MZLU06", "MZLU 006") is True
+    assert _alim_compativel("JUAU33", "PTHD218") is False
+
+
+def test_validacao_transferencia_carga_topologia_juau33():
+    """Valida detecção topológica de transferência inválida (99729 -> 3802) e correta (99728 -> 3802)"""
+    import json
+    from src.core.rede_grafo import RedeGrafoAlimentador
+
+    caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JUAU33.json")
+    if not os.path.exists(caminho_topo):
+        return
+
+    with open(caminho_topo, "r", encoding="utf-8") as f:
+        dados_json = json.load(f)
+
+    grafo = RedeGrafoAlimentador(dados_json)
+
+    # 1. Tentativa de socorrer 3802 com 99729 (chave fusível NF em ramal cego que não conecta à jusante de 3802)
+    res_invalido = grafo.validar_transferencia_carga(["99729"], "3802")
+    assert res_invalido["valido"] is False
+    assert res_invalido["conecta_jusante"] is False
+    assert res_invalido["total_jusante"] > 0
+    assert "28 - 99728" in res_invalido["chaves_sugeridas"]
+
+    # 2. Tentativa correta de socorrer 3802 com 99728 (chave faca NA que conecta à jusante de 3802)
+    res_valido = grafo.validar_transferencia_carga(["99728"], "3802")
+    assert res_valido["valido"] is True
+    assert res_valido["conecta_jusante"] is True
+    assert res_valido["nos_energizados"] == res_valido["total_jusante"]
+
+
+def test_regra_31_divergencia_circuito_normalizada():
+    """Valida que JUAU033 vs JUAU33 não gera divergência de circuito indevida na Regra 31"""
+    from src.core.rede_grafo import _alim_compativel
+
+    alim_manobra = "JUAU033"
+    alims_cad = ["JUAU33"]
+    divergencia = bool(alim_manobra and alims_cad and not any(_alim_compativel(alim_manobra, a) or alim_manobra.upper() in a for a in alims_cad))
+    assert divergencia is False
+
+

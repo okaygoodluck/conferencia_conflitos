@@ -169,6 +169,9 @@ class RedeGrafoAlimentador:
         if not numeq:
             return []
         cod_clean = str(numeq).strip()
+        # Se já for um ID direto de nó
+        if cod_clean in self.id_to_no:
+            return [cod_clean]
         # 1. Busca exata
         if cod_clean in self.numeq_to_ids:
             return list(self.numeq_to_ids[cod_clean])
@@ -286,6 +289,105 @@ class RedeGrafoAlimentador:
                 religadores_trifasicos.append(no)
 
         return religadores_trifasicos
+
+    def validar_transferencia_carga(self, chaves_fechadas: list[str], chave_aberta: str) -> dict:
+        """
+        Valida se o fechamento de uma ou mais chaves (socorro/interligação) garante
+        a manutenção da alimentação com tensão na zona a jusante de um equipamento
+        que está sendo aberto sob/com tensão (Regra 31.B).
+        
+        Retorna dicionário com:
+        - valido (bool): True se a jusante permanece energizada ou se a chave fechada conecta à jusante.
+        - total_jusante (int): Quantidade de nós dependentes da chave aberta no regime normal.
+        - nos_energizados (int): Quantidade de nós que permanecem energizados após a transferência.
+        - conecta_jusante (bool): Se alguma das chaves fechadas conecta diretamente ou via condutor à jusante.
+        - chaves_sugeridas (list): Chaves NA da rede que poderiam realizar o socorro daquele trecho a jusante.
+        """
+        ids_ab = self.obter_ids_por_numeq(chave_aberta)
+        if not ids_ab:
+            return {"valido": True, "motivo": "Equipamento aberto não localizado no grafo"}
+        nid_ab = ids_ab[0]
+
+        G_cond = self.obter_grafo_condutor()
+        if not G_cond.has_node(nid_ab):
+            # Equipamento já estava aberto no regime normal; abrir não corta carga nova
+            return {"valido": True, "motivo": "Equipamento já estava normalmente aberto"}
+
+        G_sem_ab = G_cond.copy()
+        G_sem_ab.remove_node(nid_ab)
+
+        comp_raiz = nx.node_connected_component(G_sem_ab, self.root_id) if (self.root_id and G_sem_ab.has_node(self.root_id)) else set()
+        jusante = {
+            n for n in G_cond.nodes()
+            if n not in comp_raiz and n != nid_ab and (self.root_id in G_cond and nx.has_path(G_cond, self.root_id, n))
+        }
+
+        if not jusante:
+            # Não há carga/nós a jusante dependentes exclusivamente deste equipamento
+            return {"valido": True, "total_jusante": 0, "nos_energizados": 0, "conecta_jusante": False}
+
+        # Simula a rede após fechar as chaves de socorro e abrir a chave de tronco
+        G_pos = self.obter_grafo_condutor(
+            chaves_abertas_adicionais={chave_aberta},
+            chaves_fechadas_adicionais=set(chaves_fechadas)
+        )
+
+        # 1. Verifica se alguma das chaves fechadas conecta/atinge a zona a jusante
+        conecta_jusante = False
+        for ch_f in chaves_fechadas:
+            ids_f = self.obter_ids_por_numeq(ch_f)
+            if not ids_f:
+                continue
+            nid_f = ids_f[0]
+            # Verifica se o nó da chave ou seus vizinhos físicos têm continuidade elétrica até a jusante
+            vizinhos_f = list(self.G_fisico.neighbors(nid_f)) if self.G_fisico.has_node(nid_f) else []
+            if nid_f in jusante or any(v in jusante for v in vizinhos_f):
+                conecta_jusante = True
+                break
+            if G_pos.has_node(nid_f):
+                for n_j in jusante:
+                    if G_pos.has_node(n_j) and nx.has_path(G_pos, nid_f, n_j):
+                        conecta_jusante = True
+                        break
+            if conecta_jusante:
+                break
+
+        # 2. Verifica quantos nós da jusante continuam energizados a partir da raiz (para socorro interno)
+        nos_energizados = [
+            n for n in jusante
+            if G_pos.has_node(n) and G_pos.has_node(self.root_id) and nx.has_path(G_pos, self.root_id, n)
+        ]
+
+        # Busca chaves NA que poderiam socorrer esta mesma jusante
+        chaves_sugeridas = []
+        for nid_na in self.nos_abertos:
+            no_na = self.id_to_no.get(nid_na, {})
+            viz_na = list(self.G_fisico.neighbors(nid_na)) if self.G_fisico.has_node(nid_na) else []
+            if any(v in jusante for v in viz_na):
+                t_eq = str(no_na.get("tipoeq") or "").strip()
+                num_eq = str(no_na.get("numeq") or "").strip()
+                if t_eq and num_eq:
+                    chaves_sugeridas.append(f"{t_eq} - {num_eq}")
+                elif num_eq:
+                    chaves_sugeridas.append(num_eq)
+
+        # Socorro externo (interligação com outro alimentador)
+        tem_socorro_externo = False
+        for ch in chaves_fechadas:
+            for n_id in self.obter_ids_por_numeq(ch):
+                if self.id_to_no.get(n_id, {}).get("alm_outro_circuito"):
+                    tem_socorro_externo = True
+                    break
+
+        valido = conecta_jusante and (len(nos_energizados) > 0 or tem_socorro_externo)
+
+        return {
+            "valido": valido,
+            "total_jusante": len(jusante),
+            "nos_energizados": len(nos_energizados),
+            "conecta_jusante": conecta_jusante,
+            "chaves_sugeridas": sorted(set(chaves_sugeridas))
+        }
 
     def detectar_reguladores_invertidos_por_fechamento(self, chave_numeq_ou_id: str,
                                                        chaves_abertas_simuladas: Optional[Set[str]] = None,
