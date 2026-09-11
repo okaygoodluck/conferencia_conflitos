@@ -522,3 +522,65 @@ def test_regra_31_divergencia_circuito_normalizada():
     assert divergencia is False
 
 
+def test_validacao_transferencia_carga_bypass_jnut310():
+    """
+    Valida que a abertura de lâmina de bypass (36 - 218027) com religador associado fechado (22 - 321391)
+    é reconhecida como operação de bypass e não gera falso positivo de transferência de carga inválida (Regra 31.B).
+    """
+    import json
+    from src.core.rede_grafo import RedeGrafoAlimentador
+
+    caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JNUT310.json")
+    if not os.path.exists(caminho_topo):
+        return
+
+    with open(caminho_topo, "r", encoding="utf-8") as f:
+        dados_json = json.load(f)
+
+    grafo = RedeGrafoAlimentador(dados_json)
+
+    res = grafo.validar_transferencia_carga(["22 - 321391"], "36 - 218027")
+    assert res["valido"] is True
+    assert res["conecta_jusante"] is True
+
+
+def test_regra45_exclusao_religador_raiz_lca_jnut310():
+    """
+    Valida que na formação de anel/paralelo pelo fechamento de 22 - 321391,
+    o religador a montante no tronco comum (LCA - 129321) não é exigido com MA15 na Regra 45,
+    restando apenas os religadores dos braços do anel (260033, 321391, 321452).
+    """
+    import json
+    from src.core.rede_grafo import RedeGrafoAlimentador
+
+    caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JNUT310.json")
+    if not os.path.exists(caminho_topo):
+        return
+
+    with open(caminho_topo, "r", encoding="utf-8") as f:
+        dados_json = json.load(f)
+
+    grafo = RedeGrafoAlimentador(dados_json)
+
+    manobra_dados = [
+        {'etapa_nome': '20 MANOBRA', 'etapa_texto_header': '20 MANOBRA JNUT310', 'equipamento': '22 - 321452', 'texto_linha': '10 MA15 - BLOQUEAR ST DO RELIGADOR E SINALIZAR 22 - 321452 JNUT310'},
+        {'etapa_nome': '20 MANOBRA', 'etapa_texto_header': '20 MANOBRA JNUT310', 'equipamento': '22 - 260033', 'texto_linha': '20 MA15 - BLOQUEAR ST DO RELIGADOR E SINALIZAR 22 - 260033 JNUT310'},
+        {'etapa_nome': '20 MANOBRA', 'etapa_texto_header': '20 MANOBRA JNUT310', 'equipamento': '22 - 321391', 'texto_linha': '30 MA15 - BLOQUEAR ST DO RELIGADOR E SINALIZAR 22 - 321391 JNUT310'},
+        {'etapa_nome': '20 MANOBRA', 'etapa_texto_header': '20 MANOBRA JNUT310', 'equipamento': '22 - 321391', 'texto_linha': '40 MA02 - FECHAR EQUIPAMENTO 22 - 321391 JNUT310 COM TENSAO COD NÃO'},
+        {'etapa_nome': '20 MANOBRA', 'etapa_texto_header': '20 MANOBRA JNUT310', 'equipamento': '36 - 218027', 'texto_linha': '50 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 36 - 218027 JNUT310 REGIAO SIM'},
+    ]
+
+    sim = grafo.simular_manobra(manobra_dados)
+    assert len(sim.get("loops_detectados", [])) > 0
+    religadores_anel = sim["loops_detectados"][0]["religadores"]
+    
+    # 129321 é tronco comum montante (LCA) e não deve constar nos religadores do ciclo
+    assert 129321 not in religadores_anel
+    assert "129321" not in [str(r) for r in religadores_anel]
+
+    # Os 3 religadores no anel devem constar e todos possuem MA15 na manobra
+    assert set([int(r) for r in religadores_anel]) == {260033, 321391, 321452}
+    assert sim.get("religadores_anel_sem_ma15") == []
+
+
+

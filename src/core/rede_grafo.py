@@ -274,6 +274,25 @@ class RedeGrafoAlimentador:
         nos_no_ciclo = set(caminho_ciclo)
         nos_no_ciclo.add(nid_chave)
 
+        # Se u e v têm caminho condutor até a raiz comum, o nó de bifurcação (LCA - Lowest Common Ancestor)
+        # e qualquer nó a montante dele pertencem ao tronco de alimentação comum.
+        # Eles não sofrem circulação de corrente através de seus contatos de corte (apenas fornecem a carga total).
+        if self.root_id and G_cond.has_node(self.root_id):
+            if nx.has_path(G_cond, self.root_id, u) and nx.has_path(G_cond, self.root_id, v):
+                path_u = nx.shortest_path(G_cond, self.root_id, u)
+                path_v = nx.shortest_path(G_cond, self.root_id, v)
+                lca = None
+                for n1, n2 in zip(path_u, path_v):
+                    if n1 == n2:
+                        lca = n1
+                    else:
+                        break
+                if lca:
+                    nos_no_ciclo.discard(lca)
+                    idx_lca = path_u.index(lca)
+                    for n_up in path_u[:idx_lca]:
+                        nos_no_ciclo.discard(n_up)
+
         religadores_trifasicos = []
         for nid in nos_no_ciclo:
             no = self.id_to_no.get(nid, {})
@@ -334,13 +353,32 @@ class RedeGrafoAlimentador:
 
         # 1. Verifica se alguma das chaves fechadas conecta/atinge a zona a jusante
         conecta_jusante = False
+        eh_operacao_bypass = False
+        no_ab = self.id_to_no.get(nid_ab, {})
+        bloco_ab = no_ab.get("idblococ")
+        desc_ab = (str(no_ab.get("endereco_livre") or "") + " " + str(no_ab.get("tagembypass") or "")).upper()
+        is_ab_bypass = any(b in desc_ab for b in ["BYPASS", "LAMINA", "LÃMINA"])
+
         for ch_f in chaves_fechadas:
             ids_f = self.obter_ids_por_numeq(ch_f)
             if not ids_f:
                 continue
             nid_f = ids_f[0]
-            # Verifica se o nó da chave ou seus vizinhos físicos têm continuidade elétrica até a jusante
+            no_f = self.id_to_no.get(nid_f, {})
+            bloco_f = no_f.get("idblococ")
+            desc_f = (str(no_f.get("endereco_livre") or "") + " " + str(no_f.get("tagembypass") or "")).upper()
+            is_f_bypass = any(b in desc_f for b in ["BYPASS", "LAMINA", "LÃMINA"])
+
             vizinhos_f = list(self.G_fisico.neighbors(nid_f)) if self.G_fisico.has_node(nid_f) else []
+
+            # Se a chave aberta e a chave fechada formam um conjunto de bypass direto
+            # (mesmo bloco de conexão, vizinhos diretos em G_fisico, ou marcada como BYPASS)
+            if nid_ab in vizinhos_f or (bloco_ab and bloco_ab == bloco_f) or is_ab_bypass or is_f_bypass:
+                conecta_jusante = True
+                eh_operacao_bypass = True
+                break
+
+            # Verifica se o nó da chave ou seus vizinhos físicos têm continuidade elétrica até a jusante
             if nid_f in jusante or any(v in jusante for v in vizinhos_f):
                 conecta_jusante = True
                 break
@@ -357,6 +395,23 @@ class RedeGrafoAlimentador:
             n for n in jusante
             if G_pos.has_node(n) and G_pos.has_node(self.root_id) and nx.has_path(G_pos, self.root_id, n)
         ]
+
+        # Se for operação de bypass direto (ex: fechar religador e abrir lâmina bypass),
+        # basta que a chave fechada (religador) esteja energizada (ou tenha caminho para a raiz/fonte).
+        if eh_operacao_bypass:
+            f_energizada = any(
+                nx.has_path(G_pos, self.root_id, self.obter_ids_por_numeq(cf)[0])
+                for cf in chaves_fechadas
+                if self.obter_ids_por_numeq(cf) and G_pos.has_node(self.obter_ids_por_numeq(cf)[0])
+            ) if (self.root_id and G_pos.has_node(self.root_id)) else True
+            if f_energizada:
+                return {
+                    "valido": True,
+                    "total_jusante": len(jusante),
+                    "nos_energizados": len(jusante),
+                    "conecta_jusante": True,
+                    "chaves_sugeridas": []
+                }
 
         # Busca chaves NA que poderiam socorrer esta mesma jusante
         chaves_sugeridas = []
