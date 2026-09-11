@@ -516,7 +516,20 @@ class RedeGrafoAlimentador:
                             r_num = str(r_no.get("numeq"))
                             r_puro = _extrair_id_puro(r_num)
                             macros_r = macros_por_equipamento.get(r_num, []) + macros_por_equipamento.get(r_puro, [])
-                            tem_ma15 = any(m[1] == "MA15" and m[0] <= idx for m in macros_r)
+                            tem_ma15 = any(
+                                m[1] == "MA15" and (m[0] <= idx or m[2].strip().upper() == etapa.strip().upper())
+                                for m in macros_r
+                            )
+                            if not tem_ma15:
+                                # Fallback textual no conjunto de itens da manobra
+                                for idx_m, mi_m in enumerate(manobra_dados):
+                                    et_m = _obter_nome_etapa(mi_m).strip().upper()
+                                    txt_m = str(mi_m.get("texto_linha", "")).upper()
+                                    if (r_num in txt_m or (r_puro and r_puro in txt_m)) and "MA15" in txt_m:
+                                        if idx_m <= idx or et_m == etapa.strip().upper():
+                                            tem_ma15 = True
+                                            break
+
                             if not tem_ma15:
                                 resultado["religadores_anel_sem_ma15"].append({
                                     "religador": r_num,
@@ -549,9 +562,19 @@ class RedeGrafoAlimentador:
 
                     macros_rt = macros_por_equipamento.get(rt_num, []) + macros_por_equipamento.get(rt_puro, [])
                     tem_ma35_ou_ma77 = any(
-                        m[1] in ["MA35", "MA77"] and m[0] <= idx
+                        m[1] in ["MA35", "MA77"] and (m[0] <= idx or m[2].strip().upper() == etapa.strip().upper())
                         for m in macros_rt
                     )
+                    if not tem_ma35_ou_ma77:
+                        # Fallback textual adicional para MA35/MA77 executado na etapa ou anterior
+                        for idx_m, mi_m in enumerate(manobra_dados):
+                            et_m = _obter_nome_etapa(mi_m).strip().upper()
+                            txt_m = str(mi_m.get("texto_linha", "")).upper()
+                            if (rt_num in txt_m or (rt_puro and rt_puro in txt_m)) and any(k in txt_m for k in ["MA35", "MA77", "NEUTRO", "FIXAR TAP"]):
+                                if idx_m <= idx or et_m == etapa.strip().upper():
+                                    tem_ma35_ou_ma77 = True
+                                    break
+
                     if not tem_ma35_ou_ma77:
                         resultado["rt_sem_ma35_ou_ma77"].append({
                             "regulador": rt_num,
@@ -576,6 +599,15 @@ class RedeGrafoAlimentador:
             idx_inv = item_inv["item_idx"]
             macros_rt = macros_por_equipamento.get(rt_num, []) + macros_por_equipamento.get(rt_puro, [])
             tem_ma36 = any(m[1] == "MA36" and m[0] >= idx_inv for m in macros_rt)
+            if not tem_ma36:
+                # Fallback textual para MA36 na etapa de recomposição/normalização
+                for idx_m, mi_m in enumerate(manobra_dados):
+                    if idx_m >= idx_inv:
+                        txt_m = str(mi_m.get("texto_linha", "")).upper()
+                        if (rt_num in txt_m or (rt_puro and rt_puro in txt_m)) and ("MA36" in txt_m or "SERVIÇO" in txt_m or "SERVICO" in txt_m):
+                            tem_ma36 = True
+                            break
+
             if not tem_ma36:
                 rts_com_falha_ma36.add(rt_num)
                 resultado["rt_sem_ma36_retorno"].append({

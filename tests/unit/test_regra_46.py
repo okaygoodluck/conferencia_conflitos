@@ -315,6 +315,42 @@ class TestRegra46(unittest.TestCase):
         self.assertEqual(len(res["reguladores_invertidos"]), 0)
         self.assertEqual(len(res["rt_sem_ma35_ou_ma77"]), 0)
 
+    def test_regra_46_rt_invertido_com_ma35_na_mesma_etapa_sucesso(self):
+        """
+        Cenário da Manobra 245251033 (MAGU104):
+        Regulador 115127 sofre inversão após fechamento da chave 22 - 182974.
+        A manobra possui MA35 para o RT listado na mesma etapa (Item 9 após Item 8)
+        e MA36 na etapa de normalização.
+        Deve reconhecer o tratamento e NÃO gerar falha de rt_sem_ma35_ou_ma77 nem rt_sem_ma36_retorno.
+        """
+        dados = {
+            "alimentador": "MAGU104",
+            "root": {"id": "ROOT_MAGU104", "refalm": "MAGU104"},
+            "nos": [
+                {"id": "ROOT", "numeq": "MAGU104", "tipono": "alimentador", "posope": "F"},
+                {"id": "CH_TRONCO", "numeq": "22 - 362300", "tipono": "Religador", "tipoeq": "22", "posope": "F"},
+                {"id": "RT_1", "numeq": "115127", "tipono": "Regulador", "tipoeq": "02", "posope": "F", "pelf": "1", "pelc": "2"},
+                {"id": "CH_BYPASS", "numeq": "22 - 182974", "tipono": "Religador", "tipoeq": "22", "posope": "A", "alm_outro_circuito": "MAGU116"},
+            ],
+            "arestas": [
+                {"id": "ROOT*CH_TRONCO"},
+                {"id": "CH_TRONCO*RT_1"},
+                {"id": "RT_1*CH_BYPASS"},
+            ]
+        }
+        g = RedeGrafoAlimentador(dados)
+        manobra = [
+            {"equipamento": "22 - 182974", "alim": "MAGU104", "texto_linha": "MA02 - FECHAR EQUIPAMENTO 22 - 182974", "etapa_nome": "20 MANOBRA"},
+            {"equipamento": "02 - 115127", "alim": "MAGU104", "texto_linha": "MA35 - COLOCAR RT NO NEUTRO 02 - 115127", "etapa_nome": "20 MANOBRA"},
+            {"equipamento": "22 - 362300", "alim": "MAGU104", "texto_linha": "MA31 - ABRIR EQUIPAMENTO 22 - 362300", "etapa_nome": "20 MANOBRA"},
+            {"equipamento": "02 - 115127", "alim": "MAGU104", "texto_linha": "MA36 - LIGAR CAIXA DE COMANDO 02 - 115127", "etapa_nome": "50 MANOBRA"},
+        ]
+        res = g.simular_manobra(manobra)
+        self.assertEqual(len(res["reguladores_invertidos"]), 1)
+        self.assertEqual(res["reguladores_invertidos"][0]["regulador"], "115127")
+        self.assertEqual(len(res["rt_sem_ma35_ou_ma77"]), 0)
+        self.assertEqual(len(res["rt_sem_ma36_retorno"]), 0)
+
 if __name__ == "__main__":
     unittest.main()
 
