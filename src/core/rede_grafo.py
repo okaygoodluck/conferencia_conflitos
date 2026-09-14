@@ -425,18 +425,50 @@ class RedeGrafoAlimentador:
                 elif num_eq:
                     chaves_sugeridas.append(num_eq)
 
+        # Extrai a subestação do tronco
+        subestacao_tronco = None
+        if self.root_id and self.id_to_no.get(self.root_id):
+            root_alim = str(self.id_to_no[self.root_id].get("refse_cod_alim", self.id_to_no[self.root_id].get("refalm", "")))
+            match_t = re.match(r'^([A-Za-z]{3,4})', root_alim)
+            if match_t:
+                subestacao_tronco = match_t.group(1).upper()
+
         # Socorro externo (interligação com outro alimentador)
         tem_socorro_externo = False
+        subestacoes_socorro = set()
         for ch in chaves_fechadas:
             for n_id in self.obter_ids_por_numeq(ch):
-                if self.id_to_no.get(n_id, {}).get("alm_outro_circuito"):
+                no_ch = self.id_to_no.get(n_id, {})
+                alim_ext = no_ch.get("alm_outro_circuito")
+                if alim_ext:
                     tem_socorro_externo = True
-                    break
+                    match_ext = re.match(r'^([A-Za-z]{3,4})', str(alim_ext))
+                    if match_ext:
+                        subestacoes_socorro.add(match_ext.group(1).upper())
+
+        paralelo_invalido_se = False
+        if tem_socorro_externo and subestacao_tronco:
+            if any(se != subestacao_tronco for se in subestacoes_socorro):
+                paralelo_invalido_se = True
 
         valido = conecta_jusante and (len(nos_energizados) > 0 or tem_socorro_externo)
+        
+        # Se for paralelo inválido (SEs diferentes), a transferência COM tensão falha
+        if paralelo_invalido_se:
+            valido = False
+
+        motivo_invalido = ""
+        if not valido:
+            if paralelo_invalido_se:
+                motivo_invalido = f"Paralelismo inválido (fontes de subestações distintas: {subestacao_tronco} vs {', '.join(subestacoes_socorro)})"
+            elif not conecta_jusante:
+                motivo_invalido = "Chaves de socorro não conectam à jusante desenergizada"
+            else:
+                motivo_invalido = "Falta de caminho energizado até a fonte (paralelismo ineficaz)"
 
         return {
             "valido": valido,
+            "motivo": motivo_invalido,
             "total_jusante": len(jusante),
             "nos_energizados": len(nos_energizados),
             "conecta_jusante": conecta_jusante,

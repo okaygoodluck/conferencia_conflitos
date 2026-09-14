@@ -348,78 +348,72 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
             "User-Agent": "Jakarta Commons-HttpClient/3.1"
         }
 
-        log_func(f"[GDIS Dinâmico] Consultando topologia ao vivo para o alimentador '{cand}'...")
-
-        # Tentativa 1: Via context.request do Playwright (compartilha contexto de rede e cookies do browser)
-        try:
-            resp = context.request.post(
-                url_rede,
-                params=params,
-                headers=headers,
-                form=payload,
-                timeout=30000
-            )
-            if resp.status == 200:
-                txt_resp = resp.text()
-                if "cookiecheck" not in txt_resp:
-                    try:
-                        cand_json = resp.json()
-                        if isinstance(cand_json, dict) and cand_json.get("nos"):
-                            dados_json = cand_json
-                            cod_clean = cand
-                            break
-                    except Exception as e:  # noqa: BLE001
-                        print(f"[DEBUG] Ignored error: {e}")
-                else:
-                    log_func(f"[GDIS Dinâmico] Servidor Apoio solicitou cookiecheck para '{cand}'.")
-            elif resp.status == 204:
-                log_func(f"[GDIS Dinâmico] Alimentador '{cand}' sem rede cadastrada no GDIS Apoio (HTTP 204).")
-            else:
-                log_func(f"[GDIS Dinâmico] HTTP {resp.status} retornado para '{cand}'.")
-        except Exception as e_pw:  # noqa: BLE001
-            log_func(f"[GDIS Dinâmico] Tentando fallback HTTP direto para '{cand}': {e_pw}")
-
-        # Tentativa 2: Fallback via urllib caso Playwright request não tenha retornado dados
-        if not dados_json and jsessionid:
+        def _fetch(ambiente):
+            payload_env = dict(payload)
+            payload_env["ambiente"] = ambiente
+            
+            # Tentativa 1: Playwright
             try:
-                import urllib.parse
-                import urllib.request
-                url_full = url_rede + "?" + urllib.parse.urlencode(params)
-                encoded_body = urllib.parse.urlencode(payload).encode("utf-8")
-                h_urllib = {
-                    "User-Agent": "Jakarta Commons-HttpClient/3.1",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Cookie": "; ".join(cookie_header_parts)
-                }
-                req = urllib.request.Request(url_full, data=encoded_body, headers=h_urllib, method="POST")
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    if r.status == 200:
-                        raw_text = r.read().decode("utf-8", errors="replace")
-                        if "cookiecheck" not in raw_text:
-                            cand_json = json.loads(raw_text)
-                            if isinstance(cand_json, dict) and cand_json.get("nos"):
-                                dados_json = cand_json
-                                cod_clean = cand
-                                break
-                        else:
-                            log_func("[GDIS Dinâmico] Servidor Apoio requer autenticação em gdis-apoio.")
-            except Exception as e_url:  # noqa: BLE001
-                log_func(f"[GDIS Dinâmico] Fallback HTTP: {e_url}")
+                resp = context.request.post(url_rede, params=params, headers=headers, form=payload_env, timeout=30000)
+                if resp.status == 200:
+                    txt = resp.text()
+                    if "cookiecheck" not in txt:
+                        try:
+                            js = resp.json()
+                            if isinstance(js, dict) and js.get("nos"):
+                                return js, False
+                        except Exception as e:  # noqa: BLE001
+                            log_func(f"[GDIS Dinâmico] Erro JSON Playwright ({ambiente}): {e}")
+                    else:
+                        log_func(f"[GDIS Dinâmico] Servidor Apoio solicitou cookiecheck ({ambiente}) para '{cand}'.")
+                        return None, True
+                elif resp.status == 204:
+                    if ambiente == "operacao":
+                        log_func(f"[GDIS Dinâmico] Alimentador '{cand}' sem rede cadastrada no GDIS Apoio (HTTP 204).")
+                else:
+                    log_func(f"[GDIS Dinâmico] HTTP {resp.status} retornado para '{cand}' ({ambiente}).")
+            except Exception as e_pw:  # noqa: BLE001
+                log_func(f"[GDIS Dinâmico] Tentando fallback HTTP direto para '{cand}' ({ambiente}): {e_pw}")
 
-        if dados_json and isinstance(dados_json, dict) and dados_json.get("nos"):
-            # Se o ambiente operacao retornou poucos nós (< 20), tenta obter o cadastro completo no GDIS Apoio
-            if len(dados_json.get("nos", [])) < 20:
+            # Tentativa 2: Urllib fallback
+            if jsessionid:
                 try:
-                    payload_cad = dict(payload)
-                    payload_cad["ambiente"] = "cadastro"
-                    resp_cad = context.request.post(url_rede, params=params, headers=headers, form=payload_cad, timeout=30000)
-                    if resp_cad.status == 200 and "cookiecheck" not in resp_cad.text():
-                        cad_json = resp_cad.json()
-                        if isinstance(cad_json, dict) and len(cad_json.get("nos", [])) > len(dados_json.get("nos", [])):
-                            dados_json = cad_json
-                            log_func(f"[GDIS Dinâmico] Topologia cadastral completa obtida para '{cand}': {len(dados_json.get('nos', []))} nós.")
-                except Exception as e:  # noqa: BLE001
-                    print(f"[DEBUG] Ignored error: {e}")
+                    import urllib.parse
+                    import urllib.request
+                    url_full = url_rede + "?" + urllib.parse.urlencode(params)
+                    encoded_body = urllib.parse.urlencode(payload_env).encode("utf-8")
+                    h_urllib = {
+                        "User-Agent": "Jakarta Commons-HttpClient/3.1",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Cookie": "; ".join(cookie_header_parts)
+                    }
+                    req = urllib.request.Request(url_full, data=encoded_body, headers=h_urllib, method="POST")
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        if r.status == 200:
+                            raw_text = r.read().decode("utf-8", errors="replace")
+                            if "cookiecheck" not in raw_text:
+                                js = json.loads(raw_text)
+                                if isinstance(js, dict) and js.get("nos"):
+                                    return js, False
+                            else:
+                                log_func(f"[GDIS Dinâmico] Servidor Apoio requer autenticação ({ambiente}).")
+                                return None, True
+                except Exception as e_url:  # noqa: BLE001
+                    log_func(f"[GDIS Dinâmico] Fallback HTTP falhou para '{cand}' ({ambiente}): {e_url}")
+            
+            return None, False
+
+        log_func(f"[GDIS Dinâmico] Consultando topologia ao vivo para o alimentador '{cand}'...")
+        dados_json, req_auth = _fetch("operacao")
+        
+        if dados_json:
+            cod_clean = cand
+            # Se a operação retornou poucos nós, o alimentador pode estar seccionado. Tenta obter o cadastro completo.
+            if len(dados_json.get("nos", [])) < 20:
+                cad_json, _ = _fetch("cadastro")
+                if cad_json and len(cad_json.get("nos", [])) > len(dados_json.get("nos", [])):
+                    dados_json = cad_json
+                    log_func(f"[GDIS Dinâmico] Topologia cadastral completa obtida para '{cand}': {len(dados_json.get('nos', []))} nós.")
             break
 
     # Fallback local em C:\CEMIG\scada_dados\dados_ortogonal apenas se GDIS não retornou dados
@@ -3487,8 +3481,9 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                         ch_sug = res_transf.get("chaves_sugeridas", [])
                                         sug_txt = f" Chave(s) NA indicada(s) para socorro deste trecho: {', '.join(ch_sug)}." if ch_sug else ""
                                         fe_nomes_str = ', '.join([f"'{c}'" for c in chaves_fechadas_nomes])
+                                        motivo_grafo = res_transf.get("motivo") or f"a chave fechada {fe_nomes_str} não conecta à zona a jusante"
                                         falhas_r31b.append(
-                                            f"Transferência de carga inválida com tensão no equipamento '{eq_ab}' na {et_ab}: a chave fechada {fe_nomes_str} não conecta à zona a jusante ({total_j} equipamentos/clientes ficariam sem tensão, provocando desligamento indevido de clientes).{sug_txt}"
+                                            f"Transferência de carga inválida com tensão no equipamento '{eq_ab}' na {et_ab}: {motivo_grafo} ({total_j} equipamentos/clientes ficariam sem tensão, provocando desligamento indevido de clientes).{sug_txt}"
                                         )
 
                 if falhas_r31b:
