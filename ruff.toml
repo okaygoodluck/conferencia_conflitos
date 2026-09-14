@@ -1,0 +1,17 @@
+[lint]
+ignore = [
+    "SIM102",  # nested ifs
+    "SIM103",  # return condition directly
+    "PERF102", # dict values()
+    "PLC0206", # dict items() instead of keys()
+    "PLW0602", # global no assignment
+    "S110",    # try-except-pass
+    "C405",    # Unnecessary list literal
+    "F841",    # Unused local variable
+    "B023",    # Function definition does not bind loop variable
+    "DTZ007",  # Naive datetime
+    "DTZ005",  # naive datetime without tz
+    "RUF059",  # unpacked var never used
+    "TRY002",  # create your own exception
+    "RUF046",  # Value being cast to int is already an integer
+]

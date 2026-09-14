@@ -1,13 +1,12 @@
-import unittest
 import os
-import sys
 import re
+import sys
+import unittest
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
-from src.core import conferidor_manobras
 
 class TestRegra31CoerenciaEstado(unittest.TestCase):
 
@@ -204,7 +203,7 @@ class TestRegra31CoerenciaEstado(unittest.TestCase):
         obs_ab = mi_ab.get('observacao', '').upper()
         texto_completo_ab = f"{mi_ab['equipamento']} {obs_ab} {mi_ab['texto_linha'].upper()}"
         digits_ab = set(re.findall(r'\b\d{4,7}\b', texto_completo_ab))
-        is_solicitacao_boundary = any(digits_ab & set(re.findall(r'\b\d{4,7}\b', sol_eq)) for sol_eq in sol_dict.keys())
+        is_solicitacao_boundary = any(digits_ab & set(re.findall(r'\b\d{4,7}\b', sol_eq)) for sol_eq in sol_dict)
         self.assertTrue(is_solicitacao_boundary, "Trafo 778899 na observação deve ser reconhecido como boundary da solicitação")
 
         # Teste 2: Mesmo horário e contexto de gerador

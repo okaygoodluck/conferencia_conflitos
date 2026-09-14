@@ -1,5 +1,5 @@
-import os
 import getpass
+import os
 import re
 
 from playwright.sync_api import sync_playwright
@@ -52,8 +52,8 @@ def _wait_ajax_idle(page, timeout=30000):
             }""",
             timeout=timeout,
         )
-    except:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
 
 def _ensure_consultar_manobras_panel(page):
     try:
@@ -65,13 +65,13 @@ def _ensure_consultar_manobras_panel(page):
                 return !!(s && s.display !== 'none');
             }"""
         )
-    except:
+    except Exception:  # noqa: BLE001
         is_open = True
     if not is_open:
         try:
             page.click("div[id='formPesquisa:consultaManobras2_header']", timeout=5000)
-        except:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
         _wait_ajax_idle(page, timeout=30000)
         try:
             page.wait_for_function(
@@ -83,8 +83,8 @@ def _ensure_consultar_manobras_panel(page):
                 }""",
                 timeout=15000,
             )
-        except:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
 
 def _wait_results_contain_numero(page, numero, timeout=25000):
     try:
@@ -100,8 +100,8 @@ def _wait_results_contain_numero(page, numero, timeout=25000):
             numero,
             timeout=timeout,
         )
-    except:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
 
 def _extract_numbers_from_table(page):
     return page.evaluate(
@@ -172,16 +172,16 @@ def _open_detail_from_results(page, numero):
                 try { delete window.__gdis_sameCount; } catch(e) {}
             }"""
         )
-    except:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
     try:
         page.wait_for_selector(
             "table[id$=':itensCadastrados']",
             timeout=25000,
             state="attached",
         )
-    except:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
 
 
 def _expand_itens_panels(page):
@@ -207,14 +207,14 @@ def _expand_itens_panels(page):
                 }""",
                 hid,
             )
-        except:
+        except Exception:  # noqa: BLE001
             is_open = True
 
         if not is_open:
             try:
                 page.click(f"div[id='{hid}']", timeout=5000)
-            except:
-                pass
+            except Exception as e:  # noqa: BLE001
+                print(f"[DEBUG] Ignored error: {e}")
             _wait_ajax_idle(page, timeout=30000)
 
 
@@ -258,8 +258,8 @@ def _wait_extraction_stable(page, timeout_ms=25000):
             }""",
             timeout=timeout_ms,
         )
-    except:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
 
 
 def _extract_equipamentos(page):
@@ -491,7 +491,7 @@ def main():
                         snapshot_antes,
                         timeout=15000,
                     )
-                except:
+                except Exception:  # noqa: BLE001
                     page.wait_for_timeout(800)
                 _wait_ajax_idle(page, timeout=30000)
 
@@ -534,8 +534,8 @@ def main():
                     }""",
                     timeout=25000,
                 )
-            except:
-                pass
+            except Exception as e:  # noqa: BLE001
+                print(f"[DEBUG] Ignored error: {e}")
 
             # Contagem de manobras (ENVIADA PARA O CONDIS):
             # - Lê a coluna "Nº da Manobra" na tabela de resultados
@@ -628,7 +628,7 @@ def main():
                         snapshot_antes,
                         timeout=15000,
                     )
-                except:
+                except Exception:  # noqa: BLE001
                     page.wait_for_timeout(800)
                 _wait_ajax_idle(page, timeout=30000)
 
@@ -658,17 +658,17 @@ def main():
                     _ensure_consultar_manobras_panel(page)
                     try:
                         page.fill("input[id='formPesquisa:dataInicioInputDate']", "")
-                    except:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                     try:
                         page.fill("input[id='formPesquisa:dataTerminioInputDate']", "")
-                    except:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                     page.fill("input[id='formPesquisa:numeroManobra']", numero)
                     try:
                         page.select_option("select[id='formPesquisa:situacao']", value="")
-                    except:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                     page.click("input[id='formPesquisa:j_id109']")
                     page.wait_for_selector("table[id='formManobra:resulPesManobra']", timeout=25000)
                     _wait_ajax_idle(page, timeout=30000)
@@ -679,7 +679,7 @@ def main():
                             f"table[id='formManobra:resulPesManobra'] a:has-text('{numero}')",
                             timeout=15000,
                         )
-                    except:
+                    except Exception:  # noqa: BLE001
                         print(f"MANOBRA {numero}")
                         print("  Equipamentos: -")
                         print("  Alimentadores/Subestações: -")
@@ -704,8 +704,8 @@ def main():
                                 }""",
                                 timeout=15000,
                             )
-                        except:
-                            pass
+                        except Exception as e:  # noqa: BLE001
+                            print(f"[DEBUG] Ignored error: {e}")
 
                         equipamentos = _extract_equipamentos(page)
                         eqptos = equipamentos.get("eqpto_trafos") or []
@@ -728,17 +728,17 @@ def main():
                     print(f"MANOBRA {numero}")
                     print(f"  Equipamentos: {'; '.join(eqptos) if eqptos else '-'}")
                     print(f"  Alimentadores/Subestações: {'; '.join(alim) if alim else '-'}")
-                except:
+                except Exception:  # noqa: BLE001
                     print("  Falha ao abrir detalhe ou extrair equipamentos.")
                 finally:
                     try:
                         _back_to_search(page)
-                    except:
+                    except Exception:  # noqa: BLE001
                         try:
                             page.goto(URL_LOGIN)
-                        except:
-                            pass
-        except:
+                        except Exception as e:  # noqa: BLE001
+                            print(f"[DEBUG] Ignored error: {e}")
+        except Exception:  # noqa: BLE001
             print("Não consegui abrir Consultas -> Manobra.")
 
         input("Enter para fechar o navegador...")

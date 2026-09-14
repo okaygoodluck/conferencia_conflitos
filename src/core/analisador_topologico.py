@@ -4,8 +4,9 @@ Fornece funções para construção de grafos de rede elétrica, verificação d
 caminhos energizados entre equipamentos e análise de conflitos topológicos.
 """
 
-import logging
 import json
+import logging
+
 import networkx as nx
 
 logger = logging.getLogger("analisador_topologico")
@@ -99,7 +100,7 @@ def construir_grafo_topologico(dados_json, override_status=None):
                     cable_data = parsed
             elif isinstance(data_str, list):
                 cable_data = data_str
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("Erro ao parsear cabos da aresta %s: %s", aresta_id, e)
 
         is_edge_open = (

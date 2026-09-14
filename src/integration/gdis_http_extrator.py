@@ -2,12 +2,11 @@ import getpass
 import html
 import os
 import re
-import urllib.parse
-import urllib.error
-import urllib.request
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from http.cookiejar import CookieJar
-
 
 BASE_URL = "http://gdis-pm/gdispm"
 # IP do servidor para fallback em caso de falha DNS (Errno 11001)
@@ -23,7 +22,7 @@ URL_MANOBRA = f"{BASE_URL}/pages/manobra/manobraGeral.jsf"
 def _http_timeout():
     try:
         return float((os.getenv("GDIS_HTTP_TIMEOUT") or "60").strip())
-    except:
+    except Exception:  # noqa: BLE001
         return 60.0
 
 
@@ -127,7 +126,7 @@ def _post(opener, url, data, headers=None, max_retries=3):
                 try:
                     with opener.open(req_ip, timeout=_http_timeout()) as resp:
                         return resp.read().decode("utf-8", errors="replace")
-                except Exception:
+                except Exception as e:
                     if attempt < max_retries:
                         time.sleep(1.5 * attempt)
                         continue
@@ -164,7 +163,7 @@ def _get(opener, url, headers=None, max_retries=3):
                 try:
                     with opener.open(req_ip, timeout=_http_timeout()) as resp:
                         return resp.read().decode("utf-8", errors="replace")
-                except Exception:
+                except Exception as e:
                     if attempt < max_retries:
                         time.sleep(1.5 * attempt)
                         continue
@@ -193,7 +192,7 @@ def _extract_active_page(html_text):
         return None
     try:
         return int(m.group(1))
-    except:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -236,9 +235,7 @@ def _is_eqpto_valido(s):
         return False
     if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
         return False
-    if re.fullmatch(r"\d{1,3}", s_upper):
-        return False
-    return True
+    return not re.fullmatch(r"\d{1,3}", s_upper)
 
 
 def _parse_itens_tables(html_text):
@@ -332,20 +329,20 @@ def _parse_datas(html_text):
     search_areas = []
 
     # 1. Painel específico de elaboração/detalhe de manobra (mais confiável)
-    m_el = re.search(r'<div[^>]+id="[^"]*(?:tooglePanelElaboracaoManobra|panelPrincipal)[^"]*"[^>]*>', html_text, re.I)
+    m_el = re.search(r'<div[^>]+id="[^"]*(?:tooglePanelElaboracaoManobra|panelPrincipal)[^"]*"[^>]*>', html_text, re.IGNORECASE)
     if m_el:
         start_idx = m_el.end()
         search_areas.append(html_text[start_idx:start_idx + 8000])
 
     # 2. Containers principais do formulário
     main_ids = ["formPrincipal", "statusModalContentTable", "etapasItensForm", "tooglePanelSolicitacao"]
-    m_main = re.search(r'<div[^>]+id="(?:' + "|".join(main_ids) + r')[^"]*"[^>]*>', html_text, re.I)
+    m_main = re.search(r'<div[^>]+id="(?:' + "|".join(main_ids) + r')[^"]*"[^>]*>', html_text, re.IGNORECASE)
     if m_main:
         start_idx = m_main.end()
         search_areas.append(html_text[start_idx:start_idx + 15000])
 
     # 3. HTML limpo de filtros de pesquisa e sidebars (para evitar capturar datas de filtro)
-    html_cleaned = re.sub(r'<div[^>]+id="[^"]*(?:sidebar|painelPesquisa|filtro)[^"]*"[^>]*>[\s\S]*?</div>', '', html_text, flags=re.I)
+    html_cleaned = re.sub(r'<div[^>]+id="[^"]*(?:sidebar|painelPesquisa|filtro)[^"]*"[^>]*>[\s\S]*?</div>', '', html_text, flags=re.IGNORECASE)
     search_areas.append(html_cleaned)
     
     d_ini = ""
@@ -363,7 +360,7 @@ def _parse_datas(html_text):
             
             for label in labels:
                 pattern = label + r"[:]?[\s\S]{1,500}?" + date_regex
-                m = re.search(pattern, area, re.I)
+                m = re.search(pattern, area, re.IGNORECASE)
                 if m:
                     val = m.group(1).strip()
                     if target == "d_ini": d_ini = val
@@ -373,16 +370,16 @@ def _parse_datas(html_text):
 
     # Estratégia 2: Busca direta por IDs de input (JSF rendering)
     if not d_ini:
-        m_id_ini = re.search(r'id="[^"]*dataInicioInputDate"[^>]*value="([^"]+)"', html_text, re.I)
+        m_id_ini = re.search(r'id="[^"]*dataInicioInputDate"[^>]*value="([^"]+)"', html_text, re.IGNORECASE)
         if m_id_ini: d_ini = m_id_ini.group(1).strip()
     if not d_fim:
-        m_id_fim = re.search(r'id="[^"]*(?:dataFimInputDate|dataTerminioInputDate)"[^>]*value="([^"]+)"', html_text, re.I)
+        m_id_fim = re.search(r'id="[^"]*(?:dataFimInputDate|dataTerminioInputDate)"[^>]*value="([^"]+)"', html_text, re.IGNORECASE)
         if m_id_fim: d_fim = m_id_fim.group(1).strip()
 
     # Estratégia 3: Raspagem de tabelas (Fallback agressivo, mas filtrado)
     if not d_ini or not d_fim:
         # Busca todas as tabelas e tenta encontrar colunas de data
-        table_matches = re.finditer(r'<table([^>]*)>([\s\S]*?)</table>', html_text, re.I)
+        table_matches = re.finditer(r'<table([^>]*)>([\s\S]*?)</table>', html_text, re.IGNORECASE)
         all_found_dates = []
         
         for tm in table_matches:
@@ -393,7 +390,7 @@ def _parse_datas(html_text):
             if any(bid in table_attrs for bid in blacklist_ids):
                 continue
                 
-            ths = re.findall(r"<th[^>]*>([\s\S]*?)</th>", table_html, re.I)
+            ths = re.findall(r"<th[^>]*>([\s\S]*?)</th>", table_html, re.IGNORECASE)
             headers = [_strip_tags(h).lower() for h in ths]
             
             # Identifica colunas de data (Início/Término/Prazo são mais confiáveis que apenas 'Data')
@@ -401,7 +398,7 @@ def _parse_datas(html_text):
             if not idxs: continue
             
             # Extrai datas de todas as linhas
-            for row in re.finditer(r"<tr[^>]*>([\s\S]*?)</tr>", table_html, re.I):
+            for row in re.finditer(r"<tr[^>]*>([\s\S]*?)</tr>", table_html, re.IGNORECASE):
                 row_html = row.group(1)
                 
                 # IGNORA linhas que parecem ser de histórico ou cadastro (Ex: Manobra Cadastrada)
@@ -409,7 +406,7 @@ def _parse_datas(html_text):
                 if any(k in row_text for k in ["cadastrada", "criada", "log", "histórico", "historico", "emissão"]):
                     continue
                     
-                tds = re.findall(r"<td[^>]*>([\s\S]*?)</td>", row_html, re.I)
+                tds = re.findall(r"<td[^>]*>([\s\S]*?)</td>", row_html, re.IGNORECASE)
                 for idx in idxs:
                     if idx < len(tds):
                         val = _strip_tags(tds[idx])
@@ -423,7 +420,8 @@ def _parse_datas(html_text):
                     d_part = d.split()[0]
                     day, month, year = d_part.split('/')
                     return f"{year}-{month}-{day}"
-                except: return "9999-99-99"
+                except Exception:  # noqa: BLE001
+                    return "9999-99-99"
             
             sorted_dates = sorted(all_found_dates, key=to_sortable)
             if not d_ini: d_ini = sorted_dates[0]
@@ -468,7 +466,7 @@ def obter_sessao_gdis(usuario: str, senha: str, force_renew: bool = False):
                 _, fresh_vs = _open_manobra_page(opener, jsessionid)
                 _SESSION_CACHE["viewstate"] = fresh_vs
                 return opener, jsessionid, fresh_vs
-            except Exception:
+            except Exception:  # noqa: BLE001
                 # Se a sessão caiu no servidor, força a reconexão
                 pass
 
@@ -635,16 +633,16 @@ def coletar_manobras(opener, jsessionid, viewstate, situacao, data_inicio, data_
     """
     try:
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Falha ao recarregar a página de manobras antes da coleta: {e}")
 
     try:
         resp, vs = _pesquisar(opener, jsessionid, fresh_vs, situacao, malha=malha, data_inicio=data_inicio, data_fim=data_fim)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"[WARN] Falha na coleta de manobras para situação '{situacao}' e malha '{malha}': {e}")
         return [], fresh_vs
 
-    ids = set(x[0] for x in _find_manobra_links(resp))
+    ids = {x[0] for x in _find_manobra_links(resp)}
     if not ids:
         return [], vs
 
@@ -653,7 +651,7 @@ def coletar_manobras(opener, jsessionid, viewstate, situacao, data_inicio, data_
         for attempt in range(3):
             try:
                 resp2, vs = _datascroller_page(opener, jsessionid, vs, page)
-                page_ids = set(x[0] for x in _find_manobra_links(resp2))
+                page_ids = {x[0] for x in _find_manobra_links(resp2)}
                 active_page_after_scroll = _extract_active_page(resp2)
                 if not page_ids or (active_page_after_scroll and active_page_after_scroll < page):
                     advanced = False 
@@ -683,13 +681,13 @@ def _extract_scroller_info(html_text):
         return None, None
     
     m_single = re.search(r"['\"]ajaxSingle['\"]\s*:\s*['\"]([^'\"]+)['\"]", html_text)
-    m_form = re.search(r"<form[^>]+id=[\"']([^\"']+)[\"']", html_text, re.I)
+    m_form = re.search(r"<form[^>]+id=[\"']([^\"']+)[\"']", html_text, re.IGNORECASE)
     
     form_id = m_form.group(1) if m_form else "formManobra"
     scroller_id = m_single.group(1) if m_single else None
     
     if not scroller_id:
-        m_id = re.search(r'id=["\']([^"\']*(?:scroll|datascr)[^"\']*)["\']', html_text, re.I)
+        m_id = re.search(r'id=["\']([^"\']*(?:scroll|datascr)[^"\']*)["\']', html_text, re.IGNORECASE)
         if m_id:
             scroller_id = m_id.group(1)
             
@@ -712,14 +710,14 @@ def _datascroller_detalhe_page(opener, jsessionid, viewstate, scroller_id, form_
         resp = _post(opener, url, payload)
         new_vs = _extract_viewstate(resp) or viewstate
         return resp, new_vs
-    except Exception:
+    except Exception:  # noqa: BLE001
         return "", viewstate
 
 
 def extrair_uma_manobra(opener, jsessionid, viewstate, numero, malha="", data_inicio="", data_fim=""):
     try:
         _, fresh_vs = _open_manobra_page(opener, jsessionid)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Falha ao recarregar a página de manobras para extrair a manobra {numero}: {e}")
 
     resp, vs = _pesquisar(opener, jsessionid, fresh_vs, situacao="", malha=malha, numero_manobra=numero, data_inicio=data_inicio, data_fim=data_fim)
@@ -730,8 +728,8 @@ def extrair_uma_manobra(opener, jsessionid, viewstate, numero, malha="", data_in
             _, fresh_vs2 = _open_manobra_page(opener, jsessionid)
             resp, vs = _pesquisar(opener, jsessionid, fresh_vs2, situacao="", malha="", numero_manobra=numero, data_inicio="01/01/2020", data_fim="31/12/2035")
             links = _find_manobra_links(resp)
-        except Exception:
-            pass 
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}") 
 
     link = next((x for x in links if x[0] == str(numero)), None)
     if not link:
@@ -765,7 +763,7 @@ def extrair_uma_manobra(opener, jsessionid, viewstate, numero, malha="", data_in
                     break
                 eq_set.update(peq_all)
                 al_set.update(pal_all)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 break
 
     eq = sorted(eq_set)

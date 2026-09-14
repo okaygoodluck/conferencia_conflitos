@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 mappings_macros.py
 Mapeamento centralizado de Macros, Descrições e Regras de Inversão de Manobras SD/ADMS (CEMIG).

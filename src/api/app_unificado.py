@@ -5,15 +5,15 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
+import uuid
+import webbrowser
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
-import urllib.request
-import urllib.error
-import uuid
-import webbrowser
 
 # Garante flushing imediato de stdout/stderr para streaming de logs sem atraso
 if hasattr(sys.stdout, "reconfigure"):
@@ -45,8 +45,8 @@ def get_admin_password():
                 val = (data.get("admin_password") or "").strip()
                 if val:
                     return val
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
     return DEFAULT_ADMIN_PASSWORD
 
 def is_admin_authenticated(headers):
@@ -63,7 +63,7 @@ def _is_server_alive(port):
         req = urllib.request.Request(f"http://127.0.0.1:{port}/health")
         with urllib.request.urlopen(req, timeout=1.0) as resp:
             return resp.status == 200
-    except Exception:
+    except Exception as e:  # noqa: BLE001
         return False
 
 class ProcessManager:
@@ -123,12 +123,13 @@ class ProcessManager:
                 line_clean = line.rstrip('\r\n')
                 if line_clean:
                     self.add_log(service_key, line_clean)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self.add_log(service_key, f"[ERRO LEITURA LOG] {e}")
         finally:
             if proc.stdout:
                 try: proc.stdout.close()
-                except: pass
+                except Exception as e:  # noqa: BLE001
+                    pass
             with self.lock:
                 if self.processes[service_key]["process"] == proc:
                     self.processes[service_key]["process"] = None
@@ -174,7 +175,7 @@ class ProcessManager:
 
                 self.add_log(service_key, f"[OK] {svc['name']} ativo com PID {proc.pid}.")
                 return True, f"{svc['name']} iniciado."
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 msg = f"Falha ao iniciar {svc['name']}: {e}"
                 self.add_log(service_key, f"[ERROR] {msg}")
                 return False, msg
@@ -200,7 +201,7 @@ class ProcessManager:
                 svc["process"] = None
                 self.add_log(service_key, f"[STOPPED] {svc['name']} desligado com sucesso.")
                 return True, f"{svc['name']} encerrado."
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 msg = f"Erro ao parar {svc['name']}: {e}"
                 self.add_log(service_key, f"[ERROR] {msg}")
                 return False, msg
@@ -213,7 +214,7 @@ class ProcessManager:
     def start_all(self):
         r1, m1 = self.start_service("conflitos")
         r2, m2 = self.start_service("conferidor_manobras")
-        return True, f"Iniciando serviços..."
+        return True, "Iniciando serviços..."
 
     def stop_all(self):
         self.stop_service("conflitos")
@@ -297,7 +298,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.end_headers()
             self.wfile.write(data)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[WARN] Falha ao servir arquivo '{path}': {e}")
             self.send_response(HTTPStatus.NOT_FOUND)
             self.end_headers()
@@ -334,7 +335,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b"Gateway Timeout: sub-servico nao respondeu.")
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 if attempt == 0:
                     time.sleep(0.5)
                     continue
@@ -350,7 +351,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             base_dir = os.path.abspath(base_dir)
             target = os.path.abspath(target_path)
             return os.path.commonpath([base_dir, target]) == base_dir and os.path.exists(target) and os.path.isfile(target)
-        except Exception:
+        except Exception as e:  # noqa: BLE001
             return False
 
     def do_GET(self):
@@ -435,7 +436,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
             try:
                 data = json.loads(body)
-            except Exception:
+            except Exception as e:  # noqa: BLE001
                 data = {}
             pwd = data.get("password", "")
             if pwd == get_admin_password():
@@ -456,7 +457,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
             try:
                 data = json.loads(body)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 data = {}
                 print(f"[WARN] JSON malformado na requisição: {e}")
 
@@ -485,7 +486,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8") if length > 0 else "{}"
             try:
                 data = json.loads(body)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 data = {}
                 print(f"[WARN] JSON malformado na requisição: {e}")
 
@@ -524,11 +525,11 @@ def main():
         try:
             if not webbrowser.open(url):
                 raise Exception("webbrowser.open retornou False")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[AVISO] Falha ao abrir via Python ({e}). Tentando comando de sistema...")
             try:
                 os.system(f'start "" "{url}"')
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 print(f"[WARN] Erro ao abrir navegador: {e}")
                 print(f"       Por favor, acesse manualmente: {url}")
 
@@ -540,7 +541,7 @@ def main():
     except KeyboardInterrupt:
         print("\nDesligando Hub...")
         process_manager.stop_all()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Erro no Hub: {e}")
         input("Pressione Enter para sair...")
 

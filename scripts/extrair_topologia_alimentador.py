@@ -4,13 +4,14 @@ Obtém o JSON bruto retornado pelo serviço getRedeAlimentador (GDIS Apoio)
 para análise de conectividade, nós, trechos e modelagem de grafo elétrico.
 """
 
-import os
-import sys
-import re
-import json
-import time
-import getpass
 import argparse
+import getpass
+import json
+import os
+import re
+import sys
+import time
+
 from playwright.sync_api import sync_playwright
 
 # Garante acesso aos módulos do projeto
@@ -73,7 +74,7 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
         ]
         try:
             browser = p.chromium.launch(channel="msedge", headless=headless, args=browser_args)
-        except Exception:
+        except Exception:  # noqa: BLE001  # noqa: BLE001
             browser = p.chromium.launch(headless=headless, args=browser_args)
 
         context = browser.new_context(viewport={'width': 1280, 'height': 800})
@@ -101,7 +102,7 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
                     page_apoio.click("input[id='form_login:login_ok']")
                     page_apoio.wait_for_load_state("domcontentloaded", timeout=10000)
                     print("   ✅ Sessão GDIS Apoio ativa.")
-            except Exception as e_ap:
+            except Exception as e_ap:  # noqa: BLE001
                 print(f"   ⚠️ Aviso ao autenticar no GDIS Apoio: {e_ap}")
             finally:
                 page_apoio.close()
@@ -114,14 +115,12 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
                 c_val = cookie.get("value", "")
                 c_domain = str(cookie.get("domain", "")).lower()
                 cookie_header_parts.append(f"{c_name}={c_val}")
-                if "JSESSIONID" in c_name.upper():
-                    if "apoio" in c_domain or not jsessionid:
-                        jsessionid = c_val
+                if "JSESSIONID" in c_name.upper() and ("apoio" in c_domain or not jsessionid):
+                    jsessionid = c_val
 
             # 3. Consulta ao serviço getRedeAlimentador
             print("📡 [3/3] Consultando API getRedeAlimentador...")
             dados_json = None
-            cand_sucesso = None
 
             for cand in candidatos_alim:
                 payload = {
@@ -148,14 +147,13 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
                             cand_data = resp.json()
                             if isinstance(cand_data, dict) and cand_data.get("nos"):
                                 dados_json = cand_data
-                                cand_sucesso = cand
                                 print(f"   ✅ Sucesso no formato '{cand}'!")
                                 break
                     elif resp.status == 204:
                         print(f"   ℹ️ Alimentador '{cand}' sem rede cadastrada (HTTP 204).")
                     else:
                         print(f"   ⚠️ HTTP {resp.status} para '{cand}'.")
-                except Exception as e_req:
+                except Exception as e_req:  # noqa: BLE001
                     print(f"   ❌ Erro na requisição para '{cand}': {e_req}")
 
             if not dados_json:
@@ -169,7 +167,7 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
                 json.dump(dados_json, f_out, ensure_ascii=False, indent=2)
 
             print("\n" + "="*80)
-            print(f"🎉 TOPOLOGIA EXTRAÍDA COM SUCESSO!")
+            print("🎉 TOPOLOGIA EXTRAÍDA COM SUCESSO!")
             print(f"📁 Arquivo salvo em: {arquivo_saida}")
             print("="*80)
 
@@ -189,14 +187,14 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
 
             if nos:
                 primeiro_no = nos[0]
-                print(f"\n🏷️  CAMPOS DISPONÍVEIS EM CADA NÓ (Exemplo com nó 1):")
+                print("\n🏷️  CAMPOS DISPONÍVEIS EM CADA NÓ (Exemplo com nó 1):")
                 chaves_ordenadas = sorted(primeiro_no.keys())
                 for i in range(0, len(chaves_ordenadas), 4):
                     print("     " + ", ".join(f"'{k}'" for k in chaves_ordenadas[i:i+4]))
 
                 # Varredura de possíveis campos de conectividade topológica
                 chaves_conectividade = [
-                    k for k in primeiro_no.keys() if any(
+                    k for k in primeiro_no if any(
                         p in k.lower() for p in [
                             "no", "pai", "de", "para", "conect", "montante", "jusante", 
                             "adj", "ramo", "trecho", "barra", "vizinho", "origem", "destino"
@@ -206,7 +204,7 @@ def extrair_topologia(alim: str, usuario: str = "", senha: str = "", headless: b
                 print(f"\n🔗 Possíveis campos de conectividade identificados: {chaves_conectividade}")
 
                 # Exemplo dos 2 primeiros nós completos para inspeção direta
-                print(f"\n🔍 AMOSTRA DOS PRIMEIROS 2 NÓS:")
+                print("\n🔍 AMOSTRA DOS PRIMEIROS 2 NÓS:")
                 for idx, n in enumerate(nos[:2]):
                     print(f"--- Nó {idx+1} ({n.get('numeq', 'S/N')} - {n.get('r_tipoeq', n.get('tipono', ''))}) ---")
                     for k, val in sorted(n.items()):

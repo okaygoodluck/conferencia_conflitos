@@ -1,14 +1,16 @@
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from unittest.mock import MagicMock
 
 from src.core.conferidor_manobras import (
     _consultar_topologia_gdis,
     _get_eq_data,
+    _get_eq_id,
     _obter_prefixo_equipamento,
-    _get_eq_id
 )
+
 
 def test_obter_prefixo_e_id():
     assert _get_eq_id("36 - 107457") == "107457"
@@ -169,8 +171,8 @@ def test_limite_pre_desligamento_com_ple_bi():
 
 def test_ciclo_na_e_sem_reversao_pre_desligamento_manobra_245626825():
     """Valida que fechar religador 22-122883 na etapa 20 e abrir na etapa 50 (após dispensa PLE/BI) não é falso positivo de reversão"""
+
     from src.core.conferidor_manobras import _obter_limite_pre_desligamento
-    import re
 
     manobra_dados = [
         {'cronologia': 10, 'etapa_nome': '10 VERIFICACAO PELO COD SSO 007'},
@@ -204,8 +206,12 @@ def test_ciclo_na_e_sem_reversao_pre_desligamento_manobra_245626825():
 
 def test_regra_02_equipamentos_abertos_na_etapa_desligamento():
     """Valida que equipamentos (22 - 241173 e 28 - 89082) com abertura e sinalização na etapa de Desligamento são aprovados na Regra 02."""
-    from src.core.conferidor_manobras import _obter_limite_pre_desligamento, _item_pertence_fase_desligamento
     import re
+
+    from src.core.conferidor_manobras import (
+        _item_pertence_fase_desligamento,
+        _obter_limite_pre_desligamento,
+    )
 
     manobra_dados = [
         {'cronologia': 10, 'etapa_nome': '10 VERIFICACAO PELO COD PRRU 009'},
@@ -242,10 +248,6 @@ def test_inferencia_posope_religador_22_359323_sem_gdis():
     from src.core.conferidor_manobras import _obter_prefixo_equipamento
     eq = "22 - 359323"
     eq_data = {}  # GDIS retornou vazio / 204
-    manobra_items = [
-        {'cronologia': 10, 'texto_linha': '10 MA14 - BLOQUEAR RELIGAMENTO AUTOMATICO 22 - 359323', 'etapa_nome': '10 PREPARACAO'},
-        {'cronologia': 20, 'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 22 - 359323', 'etapa_nome': '20 DESLIGAMENTO'}
-    ]
 
     prefixo = _obter_prefixo_equipamento(eq, eq_data)
     assert prefixo == "22"
@@ -253,9 +255,8 @@ def test_inferencia_posope_religador_22_359323_sem_gdis():
     # Simula inferência da Regra 31
     posope = str(eq_data.get('posope', '')).strip().upper()
     acoes_cronologicas = ['ABRIR']
-    if not posope:
-        if acoes_cronologicas and acoes_cronologicas[0] == 'ABRIR':
-            posope = 'F'
+    if not posope and acoes_cronologicas and acoes_cronologicas[0] == 'ABRIR':
+        posope = 'F'
 
     assert posope == 'F'
 
@@ -271,8 +272,9 @@ def test_manobra_transferencia_com_carga_e_desligamento_245643023():
     1. O limite pré-desligamento é 11 (fim da etapa 30, antes da etapa 40).
     2. Nenhuma reversão prematura pré-desligamento é falsamente apontada.
     """
-    from src.core.conferidor_manobras import _obter_limite_pre_desligamento
     import re
+
+    from src.core.conferidor_manobras import _obter_limite_pre_desligamento
 
     manobra_dados = [
         # Etapa 10
@@ -338,8 +340,12 @@ def test_regra42_sinalizacao_ma06_em_desligamento_245585526():
     1. O limite pré-desligamento não é prematuramente cortado na Etapa 40.
     2. A macro MA06 na Etapa 50 é reconhecida e a Regra 42 não acusa falso alerta.
     """
-    from src.core.conferidor_manobras import _obter_limite_pre_desligamento, _item_pertence_fase_desligamento
     import re
+
+    from src.core.conferidor_manobras import (
+        _item_pertence_fase_desligamento,
+        _obter_limite_pre_desligamento,
+    )
 
     manobra_dados = [
         # Etapa 30: Manobra onde o COD abre 22 - 464229
@@ -408,8 +414,9 @@ def test_regra22_alerta_informativo_sem_tensao():
     Valida que operações de chaveamento executadas expressamente SEM TENSÃO (ex: MA01/MA02 em 28-33017 e 28-105523)
     são identificadas para emissão de alerta informativo e não geram falha/erro de saldo na Regra 22.
     """
-    from src.core.conferidor_manobras import _re_macro
     import re
+
+    from src.core.conferidor_manobras import _re_macro
 
     rastreamento_inversas = {
         "Abertura Simples (MA01/MA02)": (["MA01"], ["MA02"])
@@ -469,7 +476,7 @@ def test_regra22_alerta_informativo_sem_tensao():
 
 
 def test_normalizacao_e_compatibilidade_alimentadores():
-    from src.core.rede_grafo import _norm_alim, _alim_compativel
+    from src.core.rede_grafo import _alim_compativel, _norm_alim
 
     assert _norm_alim("JUAU 033") == "JUAU33"
     assert _norm_alim("JUAU033") == "JUAU33"
@@ -487,6 +494,7 @@ def test_normalizacao_e_compatibilidade_alimentadores():
 def test_validacao_transferencia_carga_topologia_juau33():
     """Valida detecção topológica de transferência inválida (99729 -> 3802) e correta (99728 -> 3802)"""
     import json
+
     from src.core.rede_grafo import RedeGrafoAlimentador
 
     caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JUAU33.json")
@@ -528,6 +536,7 @@ def test_validacao_transferencia_carga_bypass_jnut310():
     é reconhecida como operação de bypass e não gera falso positivo de transferência de carga inválida (Regra 31.B).
     """
     import json
+
     from src.core.rede_grafo import RedeGrafoAlimentador
 
     caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JNUT310.json")
@@ -551,6 +560,7 @@ def test_regra45_exclusao_religador_raiz_lca_jnut310():
     restando apenas os religadores dos braços do anel (260033, 321391, 321452).
     """
     import json
+
     from src.core.rede_grafo import RedeGrafoAlimentador
 
     caminho_topo = os.path.join(os.path.dirname(__file__), "..", "temp", "topologia_JNUT310.json")
@@ -579,7 +589,7 @@ def test_regra45_exclusao_religador_raiz_lca_jnut310():
     assert "129321" not in [str(r) for r in religadores_anel]
 
     # Os 3 religadores no anel devem constar e todos possuem MA15 na manobra
-    assert set([int(r) for r in religadores_anel]) == {260033, 321391, 321452}
+    assert {int(r) for r in religadores_anel} == {260033, 321391, 321452}
     assert sim.get("religadores_anel_sem_ma15") == []
 
 

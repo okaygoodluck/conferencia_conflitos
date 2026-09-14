@@ -1,13 +1,13 @@
+import io
 import json
 import os
 import re
+import sys
 import threading
 import time
-import uuid
-import sys
-import io
 import traceback
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -46,7 +46,8 @@ def _cleanup_expired_jobs():
                 fin = st["finished_at"]
                 if isinstance(fin, str):
                     try: fin = datetime.fromisoformat(fin)
-                    except: fin = None
+                    except Exception as e:  # noqa: BLE001
+                        fin = None
                 if isinstance(fin, datetime) and (now - fin).total_seconds() > JOB_TTL_SECONDS:
                     expired.append(jid)
         for jid in expired:
@@ -79,7 +80,7 @@ def _run_conferidor(job_id, manobras_lista, user, passwd):
         with STATE_LOCK:
             STATE[job_id]["state"] = "done"
             STATE[job_id]["finished_at"] = datetime.now()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
         with STATE_LOCK:
             STATE[job_id].update({"state": "error", "error": str(e), "finished_at": datetime.now()})
@@ -166,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
 
             self.send_response(HTTPStatus.NOT_FOUND)
             self.end_headers()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             _log(f"[ERRO CRÍTICO POST] {e}\n{traceback.format_exc()}")
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(e)})
 
@@ -189,7 +190,7 @@ def main():
         print(f"\n[START] Servidor aberto em http://127.0.0.1:{port}")
         print("[INFO] A porta já está ativa. O Hub Central já deve reconhecer o serviço.")
         httpd.serve_forever()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Erro fatal ao iniciar servidor: {e}")
         input("Pressione Enter para fechar...")
 

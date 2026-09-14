@@ -1,10 +1,10 @@
+import io
 import json
 import os
+import sys
 import threading
 import time
 import uuid
-import sys
-import io
 from datetime import datetime
 
 # Garante flushing imediato de stdout/stderr para streaming de logs sem atraso
@@ -42,7 +42,8 @@ def _cleanup_expired_jobs():
                 fin = st["finished_at"]
                 if isinstance(fin, str):
                     try: fin = datetime.fromisoformat(fin)
-                    except: fin = None
+                    except Exception as e:  # noqa: BLE001
+                        fin = None
                 if isinstance(fin, datetime) and (now - fin).total_seconds() > JOB_TTL_SECONDS:
                     expired.append(jid)
         for jid in expired:
@@ -51,8 +52,9 @@ def _cleanup_expired_jobs():
 
 def _fmt_seconds(seconds):
     try: s = int(round(float(seconds)))
-    except: s = 0
-    if s < 0: s = 0
+    except Exception as e:  # noqa: BLE001
+                    s = 0
+    s = max(s, 0)
     h, m, ss = s // 3600, (s % 3600) // 60, s % 60
     return f"{h:02d}:{m:02d}:{ss:02d}" if h else f"{m:02d}:{ss:02d}"
 
@@ -99,7 +101,7 @@ def _run_conflitos(job_id, base, di, df, user, passwd, situacoes, malhas, eq_man
         with STATE_LOCK:
             STATE[job_id].update({"state": "done", "finished_at": datetime.now(), "result": {**r, "elapsed": _fmt_seconds(time.perf_counter() - started_at)}})
         _log(f"Concluído com sucesso: {job_id}", log_func=thread_log)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         with STATE_LOCK:
             if job_id in STATE:
                 STATE[job_id].update({"state": "error", "error": str(e), "finished_at": datetime.now()})
@@ -223,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
 
             self.send_response(HTTPStatus.NOT_FOUND)
             self.end_headers()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"[CRITICAL ERROR] Em do_POST: {e}")
             import traceback
             traceback.print_exc()
@@ -245,7 +247,7 @@ def main():
         httpd = _ThreadedServer(("127.0.0.1", port), Handler)
         print(f"\n[START] Servidor aberto em http://127.0.0.1:{port}")
         httpd.serve_forever()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Erro: {e}")
         input("Pressione Enter para fechar...")
 

@@ -1,12 +1,13 @@
-import unittest
 import os
 import sys
+import unittest
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
 from src.core import conferidor_manobras
+
 
 class TestConferidorManobrasMono(unittest.TestCase):
     def test_carregar_dados_equipamentos_mono(self):

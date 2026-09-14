@@ -1,11 +1,11 @@
-import sys
 import os
-from datetime import datetime
+import sys
 
 # Adiciona o diretório raiz ao sys.path para importar os módulos do projeto
 sys.path.append(os.getcwd())
 
 from src.integration import gdis_http_extrator
+
 
 def test_extraction():
     # Simula o HTML real capturado pelo subagente
@@ -39,6 +39,6 @@ def test_extraction():
 if __name__ == "__main__":
     try:
         test_extraction()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"\n❌ FALHA: {e}")
         sys.exit(1)

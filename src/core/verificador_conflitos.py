@@ -2,12 +2,9 @@ import getpass
 import os
 import re
 import time
-import urllib.request
-from http.cookiejar import CookieJar
 
-from src.integration import gdis_http_extrator
 from src.core import analisador_topologico
-
+from src.integration import gdis_http_extrator
 
 SITUACOES_LABEL = {
     "EB": "ELABORADA",
@@ -180,9 +177,7 @@ def _is_eqpto_valido(s):
         return False
     if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
         return False
-    if re.fullmatch(r"\d{1,3}", s_upper):
-        return False
-    return True
+    return not re.fullmatch(r"\d{1,3}", s_upper)
 
 
 def _normalize_sets(eqptos, alims):
@@ -206,11 +201,10 @@ def _normalize_sets(eqptos, alims):
 
 def _fmt_seconds(seconds):
     try:
-        s = int(round(float(seconds)))
-    except:
+        s = round(float(seconds))
+    except Exception:  # noqa: BLE001
         s = 0
-    if s < 0:
-        s = 0
+    s = max(s, 0)
     h = s // 3600
     m = (s % 3600) // 60
     ss = s % 60
@@ -323,7 +317,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         try:
             b_eq, b_al, vs, b_ini, b_fim = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, m_base, malha="", data_inicio=d_ini_search, data_fim=d_fim_search)
             beq, bal = _normalize_sets(b_eq, b_al)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             log_func(f"[{time.strftime('%H:%M:%S')}] [WARN] Erro ao extrair manobra base {m_base}: {e}")
             beq, bal = set(), set()
             b_ini, b_fim = "", ""
@@ -448,7 +442,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 auto_malhas.add(m.group(1).upper())
         if auto_malhas:
             log_func(f"[{time.strftime('%H:%M:%S')}] [INFO] Malhas de busca auto-detectadas a partir dos alimentadores: {', '.join(sorted(auto_malhas))}")
-            malhas = sorted(list(auto_malhas))
+            malhas = sorted(auto_malhas)
         else:
             malhas = [""]
 
@@ -476,7 +470,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
                 malhas_por_manobra[m] = malha
 
     for sit in ids_por_situacao:
-        ids_por_situacao[sit] = sorted(list(set(ids_por_situacao[sit])))
+        ids_por_situacao[sit] = sorted(set(ids_por_situacao[sit]))
 
     todos_unico = sorted(set(situacoes_por_manobra.keys()))
     # Remove as próprias manobras base da lista de verificação se foram encontradas na busca
@@ -506,7 +500,7 @@ def run_verificacao(base, data_inicio, data_fim, usuario, senha, progress_cb=Non
         try:
             eq, al, vs, m_ini, m_fim = gdis_http_extrator.extrair_uma_manobra(opener, jsessionid, vs, numero, malha=m_malha, data_inicio=data_inicio, data_fim=data_fim)
             eq, al = _normalize_sets(eq, al)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             falhas.append({
                 "manobra": numero,
                 "erro": str(e),

@@ -1,15 +1,26 @@
+import getpass
+import json
 import os
 import re
-import getpass
 import time
-import json
+
 from playwright.sync_api import sync_playwright
 
 try:
-    from src.core.rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa, _norm_alim, _alim_compativel
+    from src.core.rede_grafo import (
+        RedeGrafoAlimentador,
+        _alim_compativel,
+        _norm_alim,
+        _obter_nome_etapa,
+    )
 except ImportError:
     try:
-        from rede_grafo import RedeGrafoAlimentador, _obter_nome_etapa, _norm_alim, _alim_compativel
+        from rede_grafo import (
+            RedeGrafoAlimentador,
+            _alim_compativel,
+            _norm_alim,
+            _obter_nome_etapa,
+        )
     except ImportError:
         RedeGrafoAlimentador = None
         def _norm_alim(s: str) -> str:
@@ -122,9 +133,7 @@ def _is_eqpto_valido(s):
         return False
     if s_upper.startswith("ETAPA") or "RISCO SISTEMA" in s_upper or "RISCO PARA SISTEMA" in s_upper or "MANOBRA COM RISCO" in s_upper:
         return False
-    if re.fullmatch(r"\d{1,3}", s_upper):
-        return False
-    return True
+    return not re.fullmatch(r"\d{1,3}", s_upper)
 
 def _norm_str(s):
     """Normaliza strings genéricas removendo espaços extras, acentos e capitalizando"""
@@ -295,7 +304,7 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
             if "JSESSIONID" in c_name.upper():
                 if "apoio" in c_domain or not jsessionid:
                     jsessionid = c_val
-    except Exception as e_cook:
+    except Exception as e_cook:  # noqa: BLE001
         log_func(f"[GDIS Dinâmico] Aviso ao obter cookies da sessão: {e_cook}")
 
     candidatos = [cod_clean]
@@ -359,21 +368,22 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                             dados_json = cand_json
                             cod_clean = cand
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                 else:
                     log_func(f"[GDIS Dinâmico] Servidor Apoio solicitou cookiecheck para '{cand}'.")
             elif resp.status == 204:
                 log_func(f"[GDIS Dinâmico] Alimentador '{cand}' sem rede cadastrada no GDIS Apoio (HTTP 204).")
             else:
                 log_func(f"[GDIS Dinâmico] HTTP {resp.status} retornado para '{cand}'.")
-        except Exception as e_pw:
+        except Exception as e_pw:  # noqa: BLE001
             log_func(f"[GDIS Dinâmico] Tentando fallback HTTP direto para '{cand}': {e_pw}")
 
         # Tentativa 2: Fallback via urllib caso Playwright request não tenha retornado dados
         if not dados_json and jsessionid:
             try:
-                import urllib.request, urllib.parse
+                import urllib.parse
+                import urllib.request
                 url_full = url_rede + "?" + urllib.parse.urlencode(params)
                 encoded_body = urllib.parse.urlencode(payload).encode("utf-8")
                 h_urllib = {
@@ -392,8 +402,8 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                                 cod_clean = cand
                                 break
                         else:
-                            log_func(f"[GDIS Dinâmico] Servidor Apoio requer autenticação em gdis-apoio.")
-            except Exception as e_url:
+                            log_func("[GDIS Dinâmico] Servidor Apoio requer autenticação em gdis-apoio.")
+            except Exception as e_url:  # noqa: BLE001
                 log_func(f"[GDIS Dinâmico] Fallback HTTP: {e_url}")
 
         if dados_json and isinstance(dados_json, dict) and dados_json.get("nos"):
@@ -408,8 +418,8 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                         if isinstance(cad_json, dict) and len(cad_json.get("nos", [])) > len(dados_json.get("nos", [])):
                             dados_json = cad_json
                             log_func(f"[GDIS Dinâmico] Topologia cadastral completa obtida para '{cand}': {len(dados_json.get('nos', []))} nós.")
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    print(f"[DEBUG] Ignored error: {e}")
             break
 
     # Fallback local em C:\CEMIG\scada_dados\dados_ortogonal apenas se GDIS não retornou dados
@@ -426,8 +436,8 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
                                 dados_json = loc_data
                                 log_func(f"[GDIS Dinâmico] Fallback local: utilizando topologia de '{fname}' ({len(dados_json.get('nos', []))} nós).")
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
 
     if not dados_json or not isinstance(dados_json, dict) or "nos" not in dados_json:
         return {}
@@ -438,8 +448,8 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
         os.makedirs(temp_dir, exist_ok=True)
         with open(os.path.join(temp_dir, f"topologia_{cod_clean}.json"), "w", encoding="utf-8") as f_tmp:
             json.dump(dados_json, f_tmp, ensure_ascii=False)
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[DEBUG] Ignored error: {e}")
 
     nos = dados_json.get("nos", [])
     equipamentos = {}
@@ -514,7 +524,7 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
     if RedeGrafoAlimentador and dados_json and "nos" in dados_json and "arestas" in dados_json:
         try:
             equipamentos["__grafo__"] = RedeGrafoAlimentador(dados_json)
-        except Exception as e_gr:
+        except Exception as e_gr:  # noqa: BLE001
             log_func(f"[GDIS Dinâmico] Aviso ao inicializar grafo topológico: {e_gr}")
 
     log_func(f"[GDIS Dinâmico] Sucesso: {len(nos)} nós recebidos ({len(equipamentos)} equipamentos indexados) para '{cod_clean}'.")
@@ -628,10 +638,7 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
 
     # Classificação padrão por prefixo do equipamento
     # Subestação (21, 23), Reguladores (02), Religadores de Linha Trifásicos (19, 20, 22): Telecontrolados por padrão
-    if prefixo in ["02", "19", "20", "21", "22", "23"]:
-        return True
-
-    return False
+    return prefixo in ["02", "19", "20", "21", "22", "23"]
 
 
 def validar_regra_44(manobra_dados):
@@ -661,7 +668,7 @@ def validar_regra_44(manobra_dados):
     if not etapas_pique:
         return falhas_r44
 
-    for grupo_id, itens_etapa in etapas_pique.items():
+    for itens_etapa in etapas_pique.values():
         etapa_nome_real = _obter_nome_etapa(itens_etapa[0])
         texto_cabecalho = " ".join([
             str(itens_etapa[0].get('etapa_texto_header', '')),
@@ -805,9 +812,8 @@ def _obter_limite_pre_desligamento(manobra_dados):
         tem_retorno = any(w in nome_etapa for w in termos_retorno) or (
             bool(re.search(r'\bNORMALIZA[CÇ][AÃ]O\b|\bNORMALIZAR\s+(?:A\s+)?REDE\b', nome_etapa)) and not eh_deslig
         )
-        if tem_retorno:
-            if cron > 0:
-                cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
+        if tem_retorno and cron > 0:
+            cron_primeiro_retorno = min(cron_primeiro_retorno, cron)
 
     if cron_primeiro_retorno != float('inf'):
         limite_max_permitido = cron_primeiro_retorno - 1
@@ -844,10 +850,7 @@ def _item_pertence_fase_desligamento(mi, limite_cronologia_desligamento):
 
     # Demais itens anteriores ao retorno pós-obra
     cron = mi.get('cronologia', 0)
-    if limite_cronologia_desligamento == -1 or cron <= limite_cronologia_desligamento:
-        return True
-
-    return False
+    return bool(limite_cronologia_desligamento == -1 or cron <= limite_cronologia_desligamento)
 
 
 def _obter_fases_equipamento(eq_nome, eq_data=None, mi=None, sol_info=None):
@@ -964,7 +967,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         ]
         try:
             browser = p.chromium.launch(channel="msedge", headless=headless, args=browser_args)
-        except Exception:
+        except Exception:  # noqa: BLE001
             browser = p.chromium.launch(headless=headless, args=browser_args)
         
         context = browser.new_context(viewport={'width': 1280, 'height': 800})
@@ -989,18 +992,21 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     page_apoio.click("input[id='form_login:login_ok']")
                     try:
                         page_apoio.wait_for_load_state("domcontentloaded", timeout=8000)
-                    except Exception:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                 page_apoio.close()
-            except Exception as e_apoio:
+            except Exception as e_apoio:  # noqa: BLE001
                 print(f"    [AVISO] Integração GDIS Apoio: {e_apoio}")
         except Exception:
             try: page.close()
-            except Exception: pass
+            except Exception:  # noqa: BLE001
+                pass
             try: context.close()
-            except Exception: pass
+            except Exception:  # noqa: BLE001
+                pass
             try: browser.close()
-            except Exception: pass
+            except Exception:  # noqa: BLE001
+                pass
             raise
 
         total_manobras = len(manobras_lista)
@@ -1013,7 +1019,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 try:
                     page.goto(URL_LOGIN)
                     page.wait_for_selector("text=Consultas", timeout=15000)
-                except Exception as e_nav:
+                except Exception as e_nav:  # noqa: BLE001
                     print(f"    [AVISO] Falha ao resetar navegação para a página inicial: {e_nav}")
 
                 # ============================================================
@@ -1039,14 +1045,14 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 # Aguarda especificamente até que a tabela traga o link contendo o número da manobra pesquisada
                 try:
                     page.wait_for_selector(f"table[id*='resulPesManobra'] a:has-text('{manobra_num}')", timeout=15000)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     page.wait_for_selector("table[id*='resulPesManobra']", timeout=15000)
                     page.wait_for_timeout(2000)
 
                 # Pega a Solicitação Vinculada na tabela
                 print("    Buscando número da Solicitação...")
-                solicitacao_num = page.evaluate(f"""(manobra) => {{
-                    try {{
+                solicitacao_num = page.evaluate("""(manobra) => {
+                    try {
                         const tabela = document.querySelector("table[id*='resulPesManobra']");
                         if (!tabela) return null;
                         const ths = Array.from(tabela.querySelectorAll('thead th'));
@@ -1056,34 +1062,34 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         const idxS = headers.findIndex(h => h.includes('solicita') || h.includes('vinc'));
                         if (idxM < 0 || idxS < 0) return null;
                         const rows = Array.from(tabela.querySelectorAll('tbody tr'));
-                        for (const r of rows) {{
+                        for (const r of rows) {
                             if (!r) continue;
                             const tds = r.querySelectorAll('td');
-                            if (tds.length > Math.max(idxM, idxS)) {{
+                            if (tds.length > Math.max(idxM, idxS)) {
                                 const mVal = (tds[idxM].innerText || '').replace(/\\D/g, '');
-                                if (mVal === String(manobra)) {{
+                                if (mVal === String(manobra)) {
                                     return (tds[idxS].innerText || '').replace(/\\D/g, '');
-                                }}
-                            }}
-                        }}
-                    }} catch(e) {{}}
+                                }
+                            }
+                        }
+                    } catch(e) {}
                     return null;
-                }}""", manobra_num)
+                }""", manobra_num)
 
                 if not solicitacao_num:
                     raise RuntimeError(f"Não foi possível encontrar o número da Solicitação vinculada à manobra {manobra_num}.")
 
                 # Abre o detalhe da manobra
                 print(f"    Abrindo detalhes da Manobra {manobra_num}...")
-                link_clicked = page.evaluate(f"""(num) => {{
+                link_clicked = page.evaluate("""(num) => {
                     const links = Array.from(document.querySelectorAll("table[id*='resulPesManobra'] a"));
                     const link = links.find(l => (l.innerText || '').includes(String(num)));
-                    if (link) {{
+                    if (link) {
                         link.click();
                         return true;
-                    }}
+                    }
                     return false;
-                }}""", manobra_num)
+                }""", manobra_num)
 
                 if not link_clicked:
                     raise RuntimeError(f"Link para a manobra {manobra_num} não foi encontrado na tabela de resultados da pesquisa.")
@@ -1365,17 +1371,17 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 page.wait_for_timeout(1000)
                 try:
                     page.click("text=/^\\s*Solicita[cç][aã]o\\s*$/i", timeout=5000)
-                except:
+                except Exception:  # noqa: BLE001
                     page.click("text=/Solicita[cç][aã]o de Manobra/i", timeout=5000)
         
                 page.wait_for_timeout(3000)
         
                 # Preenche pesquisa da Solicitação
-                page.evaluate(f"""(num) => {{
+                page.evaluate("""(num) => {
                     const inputs = Array.from(document.querySelectorAll('input[type="text"]'));
                     const target = inputs.find(i => ((i.id || '') + (i.name || '')).toLowerCase().includes('solicitacao'));
                     if (target) target.value = num;
-                }}""", solicitacao_num)
+                }""", solicitacao_num)
 
                 page.evaluate("""() => {
                     const btns = Array.from(document.querySelectorAll('input[type="button"], input[type="submit"], button'));
@@ -1385,11 +1391,11 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 page.wait_for_timeout(4000)
 
                 # Clica no link da solicitação
-                page.evaluate(f"""(num) => {{
+                page.evaluate("""(num) => {
                     const links = Array.from(document.querySelectorAll('a'));
                     const link = links.find(l => (l.innerText || '').includes(num));
                     if (link) link.click();
-                }}""", solicitacao_num)
+                }""", solicitacao_num)
                 page.wait_for_timeout(4000)
 
                 print("    Extraindo painéis da Solicitação (Locais/Serviços)...")
@@ -1651,8 +1657,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             const s = window.getComputedStyle(modal);
                             return !s || s.display === 'none' || s.visibility === 'hidden';
                         }""", timeout=15000)
-                    except Exception:
-                        pass
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[DEBUG] Ignored error: {e}")
                     page.wait_for_timeout(800)
 
                 # ============================================================
@@ -1913,7 +1919,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                     # 2. Verificação de existência e Quantidade
                     num_equipes_header = 0
-                    for sigla, _ in siglas_validar.items():
+                    for sigla in siglas_validar:
                         # Procura a sigla no texto
                         m_sigla = re.search(r'\b' + sigla + r'\b\s*:\s*(\d+)', texto_primeira)
                         if re.search(r'\b' + sigla + r'\b', texto_primeira):
@@ -1986,7 +1992,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         m = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', str(s))
                         if m: return datetime.strptime(m.group(1), "%d/%m/%Y %H:%M")
                         return None
-                    except: return None
+                    except Exception:  # noqa: BLE001
+                        return None
 
                 dt_sol_ini = parse_dt(solicitacao_datas.get('inicio', ''))
                 dt_sol_fim = parse_dt(solicitacao_datas.get('termino', ''))
@@ -2011,11 +2018,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         m_dt = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', dt_str)
                         if m_dt:
                             dt_obj = parse_dt(m_dt.group(1))
-                            if dt_obj:
-                                if not is_preparacao:
-                                    todos_horarios_validos.append(dt_obj)
-                                    if "DESLIGAMENTO" in etapa_full:
-                                        horarios_deslig.append(dt_obj)
+                            if dt_obj and not is_preparacao:
+                                todos_horarios_validos.append(dt_obj)
+                                if "DESLIGAMENTO" in etapa_full:
+                                    horarios_deslig.append(dt_obj)
         
                     if not todos_horarios_validos: continue
         
@@ -2235,7 +2241,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             # Fallback 1: tentar casar ignorando prefixos (e.g. "24 - 12345" na solicitação, "12345" na manobra)
                             eq_sem_prefixo = _get_eq_id(eq)
                             encontrou_fallback = False
-                            for k in manobra_map.keys():
+                            for k in manobra_map:
                                 k_sem_prefixo = _get_eq_id(k)
                                 if eq_sem_prefixo == k_sem_prefixo:
                                     eq = k
@@ -2274,7 +2280,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             if alim_ok:
                                 print_regra(3, "OK", f"Alimentador '{sol_alim}' confirmado para o equipamento '{eq}'.")
                             else:
-                                alims_found = set(mi['alim'] for mi in manobra_items if mi['alim'])
+                                alims_found = {mi['alim'] for mi in manobra_items if mi['alim']}
                                 alims_str = ", ".join(alims_found) if alims_found else "Nenhum"
                                 print_regra(3, "ERRO", f"Equipamento '{eq}': Alimentador divergente da Solicitação (Esperado: {sol_alim}, Encontrado: {alims_str}). Ajuste o alimentador na manobra.")
 
@@ -2286,7 +2292,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             if local_ok:
                                 print_regra(4, "OK", f"Local '{sol_local}' confirmado para o equipamento '{eq}'.")
                             else:
-                                locais_found = set(mi['local'] for mi in manobra_items if mi['local'] and mi['local'] != '-')
+                                locais_found = {mi['local'] for mi in manobra_items if mi['local'] and mi['local'] != '-'}
                                 locais_str = ", ".join(locais_found) if locais_found else "Nenhum"
                                 print_regra(4, "ERRO", f"Equipamento '{eq}': Local divergente da Solicitação (Esperado: {sol_local}, Encontrado: {locais_str}). Ajuste o local na manobra.")
 
@@ -2545,7 +2551,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             if not primeira_acao: primeira_acao = 'ABRIR'
                             # Só emite erro se há certeza de que estava ABERTO (posope=A confirmado)
                             if estado_simulado == 'A':
-                                msg = f"Tentativa de Abertura em equipamento que já consta como Aberto (NA/POSOPE=A)"
+                                msg = "Tentativa de Abertura em equipamento que já consta como Aberto (NA/POSOPE=A)"
                                 erro_31.append(msg)
                             estado_simulado = 'A'
                         elif is_fechamento:
@@ -2553,7 +2559,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             # Só emite erro se há certeza de que estava FECHADO (posope=F confirmado).
                             # Quando o estado é desconhecido (''), fechar é operação válida (equipamento NA → NF).
                             if estado_simulado == 'F':
-                                msg = f"Tentativa de Fechamento em equipamento que já consta como Fechado (NF/POSOPE=F)"
+                                msg = "Tentativa de Fechamento em equipamento que já consta como Fechado (NF/POSOPE=F)"
                                 erro_31.append(msg)
                             estado_simulado = 'F'
 
@@ -2681,12 +2687,12 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     
                                 if prefixo not in ["01", "04"]:
                                     falha_regra10 = True
-                                    motivo_falha_10 = f"Permitido apenas para prefixos 01 ou 04."
+                                    motivo_falha_10 = "Permitido apenas para prefixos 01 ou 04."
                                 elif prefixo == "01":
                                     # Verifica se tem 'CHAVE DESLOCADA' na mesma linha, aceitando espaços extras no meio
                                     if not re.search(r'\bCHAVE\s+DESLOCADA\b', mi['texto_linha'], re.IGNORECASE):
                                         falha_regra10 = True
-                                        motivo_falha_10 = f"Prefixo 01 exige a observação 'CHAVE DESLOCADA' junto à macro."
+                                        motivo_falha_10 = "Prefixo 01 exige a observação 'CHAVE DESLOCADA' junto à macro."
 
                     if acoes_bloq_encontradas:
                         str_macros_bloq = ", ".join(sorted(set(acoes_bloq_encontradas)))
@@ -2976,7 +2982,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         
                     # REGRA 2 (Ação Inicial de Abertura e Sinalização até o Desligamento) - Apenas para equipamentos da solicitação
                     eq_id_atual = _get_eq_id(eq)
-                    is_sol_eq = (eq in sol_dict) or any(_get_eq_id(k) == eq_id_atual for k in sol_dict.keys())
+                    is_sol_eq = (eq in sol_dict) or any(_get_eq_id(k) == eq_id_atual for k in sol_dict)
 
                     if is_sol_eq:
                         itens_ate_deslig = [mi for mi in manobra_items if _item_pertence_fase_desligamento(mi, limite_cronologia_desligamento)]
@@ -3071,7 +3077,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         obs = mi.get('observacao', '').upper()
             
                         # Contagem para validação cronológica (Fase PRE e POST)
-                        for m_lock in counts_bloqueios.keys():
+                        for m_lock in counts_bloqueios:
                             if re.search(_re_macro(m_lock), txt):
                                 zona = "post" if passou_deslig else "pre"
                                 counts_bloqueios[m_lock][zona] += 1
@@ -3178,7 +3184,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 def get_etapa_ident(mi):
                     return mi.get('grupo_id', 'Bloco_Desconhecido')
         
-                grupos_etapas = set(get_etapa_ident(mi) for m_items in manobra_map.values() for mi in m_items)
+                grupos_etapas = {get_etapa_ident(mi) for m_items in manobra_map.values() for mi in m_items}
     
                 for eh_grupo in grupos_etapas:
                     if not eh_grupo or eh_grupo == '|': continue
@@ -3399,11 +3405,11 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                         # 1. Reconhecimento de equipamento de fronteira/delimitador da solicitação
                         # Verifica pelo número normalizado ou pelos dígitos presentes no equipamento ou observação (ex: TRAFO 778899 - 3 - 45)
-                        is_solicitacao_boundary = any(_norm_eqpto(eq_ab) == _norm_eqpto(sol_eq) for sol_eq in sol_dict.keys())
+                        is_solicitacao_boundary = any(_norm_eqpto(eq_ab) == _norm_eqpto(sol_eq) for sol_eq in sol_dict)
                         if not is_solicitacao_boundary:
                             digits_ab = set(re.findall(r'\b\d{4,7}\b', texto_completo_ab))
                             if digits_ab:
-                                for sol_eq in sol_dict.keys():
+                                for sol_eq in sol_dict:
                                     digits_sol = set(re.findall(r'\b\d{4,7}\b', sol_eq))
                                     if digits_ab & digits_sol:
                                         is_solicitacao_boundary = True
@@ -3442,11 +3448,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                 hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
                                 
                                 mesmo_horario = False
-                                if hora_ab and hora_fe and (hora_ab == hora_fe):
-                                    mesmo_horario = True
-                                elif mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id'):
-                                    mesmo_horario = True
-                                elif et_ab == fe_post['etapa']:
+                                if hora_ab and hora_fe and (hora_ab == hora_fe) or mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id') or et_ab == fe_post['etapa']:
                                     mesmo_horario = True
                                 
                                 ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
@@ -3473,7 +3475,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                     if alim_ab:
                                         grafo_cand = grafos_alimentadores.get(alim_ab) or grafos_alimentadores.get(_norm_alim(alim_ab))
                                     if not grafo_cand:
-                                        for g_k, g_v in grafos_alimentadores.items():
+                                        for g_v in grafos_alimentadores.values():
                                             if hasattr(g_v, 'obter_ids_por_numeq') and g_v.obter_ids_por_numeq(eq_ab):
                                                 grafo_cand = g_v
                                                 break
@@ -3574,7 +3576,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                 # Integração com o Grafo Topológico GDIS (Regra 45)
                 if grafos_alimentadores:
-                    for cod_a, grafo in grafos_alimentadores.items():
+                    for grafo in grafos_alimentadores.values():
                         sim_g = grafo.simular_manobra(manobra_dados)
                         if sim_g.get("loops_detectados"):
                             operacao_anel_com_tensao = True
@@ -3610,7 +3612,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 rts_envolvidos = set()
 
                 if grafos_alimentadores:
-                    for cod_a, grafo in grafos_alimentadores.items():
+                    for grafo in grafos_alimentadores.values():
                         sim_g = grafo.simular_manobra(manobra_dados)
                         for r_inv in sim_g.get("reguladores_invertidos", []):
                             rts_envolvidos.add(r_inv.get("regulador"))
@@ -3657,29 +3659,29 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
                 print(f"   VERIFICAÇÃO DA MANOBRA {manobra_num} CONCLUÍDA COM SUCESSO!   ")
                 print("="*57 + f"{Colors.RESET}")
-            except Exception as e_manobra:
+            except Exception as e_manobra:  # noqa: BLE001
                 print(f"\n❌ [ERRO NO PROCESSAMENTO DA MANOBRA {manobra_num}]: {e_manobra}")
                 try:
                     page.goto(URL_LOGIN)
                     page.wait_for_timeout(1000)
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    print(f"[DEBUG] Ignored error: {e}")
             finally:
                 print(f"\n>>> MANOBRA_END: {manobra_num}\n")
         # Encerramento ordenado e seguro: page -> context -> browser
         # Cada etapa em try/except para evitar "Event loop is closed"
         try:
             page.close()
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
         try:
             context.close()
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
         try:
             browser.close()
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[DEBUG] Ignored error: {e}")
 
     print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
     print("      LOTE DE MANOBRAS CONCLUÍDO COM SUCESSO!         ")

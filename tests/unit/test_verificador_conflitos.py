@@ -1,6 +1,6 @@
-import unittest
 import os
 import sys
+import unittest
 
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if base_dir not in sys.path:
@@ -8,11 +8,10 @@ if base_dir not in sys.path:
 
 from src.core.verificador_conflitos import (
     SITUACOES_LABEL,
-    _parse_situacoes_env,
     _normalize_situacoes,
-    DIVISAS_MALHAS,
-    obter_divisas_malha,
+    _parse_situacoes_env,
     expandir_malhas_com_divisas,
+    obter_divisas_malha,
 )
 
 

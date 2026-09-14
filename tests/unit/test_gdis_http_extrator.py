@@ -1,5 +1,7 @@
 import unittest
+
 from src.integration.gdis_http_extrator import _super_fallback_equipamentos
+
 
 class TestGdisHttpExtrator(unittest.TestCase):
     def test_super_fallback_equipamentos(self):
@@ -48,7 +50,7 @@ class TestGdisHttpExtrator(unittest.TestCase):
                         if tag_end != -1 and tag_end < idx:
                             import re
                             tag_attrs = html_text[a_idx:tag_end]
-                            id_match = re.search(r'id=["\']([^"\']+)["\']', tag_attrs, re.I)
+                            id_match = re.search(r'id=["\']([^"\']+)["\']', tag_attrs, re.IGNORECASE)
                             if id_match:
                                 found.append((str(numero), id_match.group(1)))
                 start = idx + 1

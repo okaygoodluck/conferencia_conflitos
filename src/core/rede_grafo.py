@@ -4,10 +4,9 @@ Mapeia nós, trechos, conectividade radial, loops/anéis elétricos e sentido de
 para suporte às validações de manobras (Regra 45: Bloqueio de ST e Regra 46: RT Invertido).
 """
 
-import re
-import json
 import logging
-from typing import Dict, List, Set, Tuple, Optional, Any
+import re
+
 import networkx as nx
 
 logger = logging.getLogger(__name__)
@@ -77,9 +76,9 @@ class RedeGrafoAlimentador:
         self.G_fisico = nx.Graph()
 
         # Indexadores rápidos
-        self.id_to_no: Dict[str, dict] = {}
-        self.numeq_to_ids: Dict[str, List[str]] = {}
-        self.nos_abertos: Set[str] = set()
+        self.id_to_no: dict[str, dict] = {}
+        self.numeq_to_ids: dict[str, list[str]] = {}
+        self.nos_abertos: set[str] = set()
 
         self._construir_grafo()
 
@@ -139,8 +138,8 @@ class RedeGrafoAlimentador:
                 if u and v:
                     self.G_fisico.add_edge(u, v, **aresta)
 
-    def obter_grafo_condutor(self, chaves_abertas_adicionais: Optional[Set[str]] = None,
-                              chaves_fechadas_adicionais: Optional[Set[str]] = None) -> nx.Graph:
+    def obter_grafo_condutor(self, chaves_abertas_adicionais: set[str] | None = None,
+                              chaves_fechadas_adicionais: set[str] | None = None) -> nx.Graph:
         """
         Retorna uma cópia do grafo elétrico condutor ativo.
         Equipamentos abertos (posope=='A') são removidos para impedir condução através deles.
@@ -164,7 +163,7 @@ class RedeGrafoAlimentador:
 
         return G
 
-    def obter_ids_por_numeq(self, numeq: str) -> List[str]:
+    def obter_ids_por_numeq(self, numeq: str) -> list[str]:
         """Retorna os IDs de nó do GDIS para um dado número de equipamento."""
         if not numeq:
             return []
@@ -185,17 +184,17 @@ class RedeGrafoAlimentador:
                 return list(v)
         return []
 
-    def obter_no_por_numeq(self, numeq: str) -> Optional[dict]:
+    def obter_no_por_numeq(self, numeq: str) -> dict | None:
         """Retorna o dicionário do primeiro nó correspondente ao equipamento."""
         ids = self.obter_ids_por_numeq(numeq)
         if ids:
             return self.id_to_no.get(ids[0])
         return None
 
-    def obter_reguladores_tensao(self) -> List[dict]:
+    def obter_reguladores_tensao(self) -> list[dict]:
         """Retorna todos os nós cadastrados como Regulador de Tensão (RT)."""
         reguladores = []
-        for nid, no in self.id_to_no.items():
+        for no in self.id_to_no.values():
             tipoeq = str(no.get("tipoeq", "")).strip()
             tipono = str(no.get("tipono", "")).strip().lower()
             rtipo = str(no.get("r_tipoeq", "")).strip().lower()
@@ -204,7 +203,7 @@ class RedeGrafoAlimentador:
                 reguladores.append(no)
         return reguladores
 
-    def obter_zona_jusante_regulador(self, reg_numeq_ou_id: str) -> Set[str]:
+    def obter_zona_jusante_regulador(self, reg_numeq_ou_id: str) -> set[str]:
         """
         Calcula o componente/zona a jusante (lado de carga) de um Regulador de Tensão
         no fluxo radial normal a partir da subestação (root) usando a topologia física.
@@ -236,12 +235,12 @@ class RedeGrafoAlimentador:
             comp_jusante = {x for x, path in paths.items() if reg_id in path}
             comp_jusante.add(reg_id)
             return comp_jusante
-        except Exception:
+        except Exception:  # noqa: BLE001
             return {reg_id}
 
     def obter_religadores_trifasicos_no_ciclo(self, chave_numeq_ou_id: str,
-                                              abertas_adicionais: Optional[Set[str]] = None,
-                                              fechadas_adicionais: Optional[Set[str]] = None) -> List[dict]:
+                                              abertas_adicionais: set[str] | None = None,
+                                              fechadas_adicionais: set[str] | None = None) -> list[dict]:
         """
         Ao simular o fechamento de uma chave, detecta se ela fecha um loop/anel elétrico
         e retorna todos os RELIGADORES TRIFÁSICOS presentes no laço formado (Regra 45).
@@ -445,10 +444,10 @@ class RedeGrafoAlimentador:
         }
 
     def detectar_reguladores_invertidos_por_fechamento(self, chave_numeq_ou_id: str,
-                                                       chaves_abertas_simuladas: Optional[Set[str]] = None,
+                                                       chaves_abertas_simuladas: set[str] | None = None,
                                                        etapa_nome: str = "",
-                                                       equipamentos_abertos_manobra: Optional[Set[str]] = None,
-                                                       alim_item: str = "") -> List[dict]:
+                                                       equipamentos_abertos_manobra: set[str] | None = None,
+                                                       alim_item: str = "") -> list[dict]:
         """
         Verifica se o fechamento de uma chave (especialmente socorro ou interligação)
         provoca alimentação reversa em algum Regulador de Tensão do circuito (Regra 46).
@@ -527,7 +526,7 @@ class RedeGrafoAlimentador:
             if G_cond.has_node(nid_chave) and G_cond.has_node(reg_id):
                 try:
                     tem_caminho_eletrico = nx.has_path(G_cond, nid_chave, reg_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     tem_caminho_eletrico = False
 
             if not tem_caminho_eletrico:
@@ -540,8 +539,8 @@ class RedeGrafoAlimentador:
                     caminho_normal = nx.shortest_path(self.G_fisico, self.root_id, reg_id)
                     if len(caminho_normal) >= 2:
                         vizinho_montante = caminho_normal[-2]
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    print(f"[DEBUG] Ignored error: {e}")
 
             # REGRA FUNDAMENTAL DE FLUXO DIRETO vs INVERSO:
             # Se o regulador está conectado à subestação (root) no grafo condutor antes do fechamento:
@@ -549,7 +548,7 @@ class RedeGrafoAlimentador:
             if self.root_id and G_cond_sem_chave.has_node(self.root_id) and G_cond_sem_chave.has_node(reg_id):
                 try:
                     tem_caminho_se = nx.has_path(G_cond_sem_chave, self.root_id, reg_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     tem_caminho_se = False
 
             if tem_caminho_se:
@@ -564,7 +563,7 @@ class RedeGrafoAlimentador:
                         G_sem_fonte_rt.remove_edge(vizinho_montante, reg_id)
                     try:
                         loop_atinge_jusante = nx.has_path(G_sem_fonte_rt, self.root_id, reg_id)
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         loop_atinge_jusante = False
 
                 if not loop_atinge_jusante:
@@ -584,7 +583,7 @@ class RedeGrafoAlimentador:
 
         return reguladores_invertidos
 
-    def simular_manobra(self, manobra_dados: List[dict]) -> dict:
+    def simular_manobra(self, manobra_dados: list[dict]) -> dict:
         """
         Executa a simulação completa da folha de manobras contra o grafo:
         1. Rastreia fechamentos que criam anéis elétricos com tensão (Regra 45) e extrai religadores trifásicos.
@@ -605,7 +604,7 @@ class RedeGrafoAlimentador:
         chaves_abertas_simuladas = set()
         equipamentos_abertos_manobra = set()
 
-        macros_por_equipamento: Dict[str, List[Tuple[int, str, str]]] = {}
+        macros_por_equipamento: dict[str, list[tuple[int, str, str]]] = {}
         rts_invertidos_ja_detectados = set()
 
         # 1. Primeiro passo: coleta macros e equipamentos que sofrem abertura na manobra
@@ -616,7 +615,7 @@ class RedeGrafoAlimentador:
 
             if eq:
                 eq_puro = _extrair_id_puro(eq)
-                for k_eq in set([eq, eq_puro]):
+                for k_eq in {eq, eq_puro}:
                     if not k_eq:
                         continue
                     if k_eq not in macros_por_equipamento:

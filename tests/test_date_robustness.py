@@ -1,10 +1,10 @@
-import re
-import sys
 import os
+import sys
 
 # Adiciona o path para importar o extrator
 sys.path.append(os.getcwd())
 from src.integration.gdis_http_extrator import _parse_datas
+
 
 def test_user_snippet():
     html_snippet = """
@@ -54,6 +54,6 @@ Data de Término:</label></td>
 if __name__ == "__main__":
     try:
         test_user_snippet()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"FALHA NO TESTE: {e}")
         sys.exit(1)
