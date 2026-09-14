@@ -3417,56 +3417,56 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         eh_transferencia_ativa = bool(fechamentos_previos) or (not eh_etapa_desligamento and not is_solicitacao_boundary)
 
                         if not is_solicitacao_boundary or eh_transferencia_ativa:
-                            if not fechamentos_previos:
-                                fechamento_posterior = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
-                                if fechamento_posterior:
-                                    fe_post = fechamento_posterior[0]
-                                    mi_fe = fe_post['mi']
-                                    txt_fe = mi_fe.get('texto_linha', '').upper()
-                                    obs_fe = mi_fe.get('observacao', '').upper()
-                                    texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
-
-                                    # 2. Contexto de GERADOR / GBT / GMT / UGTM:
-                                    contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
-                                                           for k in ["GERADOR", "GBT", "GMT", "UGTM"])
-
-                                    # 3. Critério ANEEL (PRODIST Módulo 8) e Operação COM CARGA no mesmo horário:
-                                    dt_ab = (mi_ab.get('data_hora') or '').strip()
-                                    dt_fe = (mi_fe.get('data_hora') or '').strip()
-                                    header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
-                                    header_fe = (mi_fe.get('etapa_texto_header') or '').strip()
-
-                                    m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_ab or header_ab)
-                                    m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_fe or header_fe)
-                                    hora_ab = m_dt_ab.group(0) if m_dt_ab else ""
-                                    hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
-
-                                    mesmo_horario = False
-                                    if hora_ab and hora_fe and (hora_ab == hora_fe):
-                                        mesmo_horario = True
-                                    elif mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id'):
-                                        mesmo_horario = True
-                                    elif et_ab == fe_post['etapa']:
-                                        mesmo_horario = True
-
-                                    ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
-
-                                    if contexto_gerador:
-                                        continue
-
-                                    if mesmo_horario or ambos_com_carga:
-                                        continue
-
+                            fechamentos_posteriores = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
+                            fechamentos_para_topologia = list(fechamentos_previos)
+                            falha_sequencia_detectada = False
+                            
+                            for fe_post in fechamentos_posteriores:
+                                mi_fe = fe_post['mi']
+                                txt_fe = mi_fe.get('texto_linha', '').upper()
+                                obs_fe = mi_fe.get('observacao', '').upper()
+                                texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
+                                
+                                # Contexto de GERADOR / GBT / GMT / UGTM:
+                                contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
+                                                       for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+                                
+                                dt_ab = (mi_ab.get('data_hora') or '').strip()
+                                dt_fe = (mi_fe.get('data_hora') or '').strip()
+                                header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
+                                header_fe = (mi_fe.get('etapa_texto_header') or '').strip()
+                                
+                                m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_ab or header_ab)
+                                m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_fe or header_fe)
+                                hora_ab = m_dt_ab.group(0) if m_dt_ab else ""
+                                hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
+                                
+                                mesmo_horario = False
+                                if hora_ab and hora_fe and (hora_ab == hora_fe):
+                                    mesmo_horario = True
+                                elif mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id'):
+                                    mesmo_horario = True
+                                elif et_ab == fe_post['etapa']:
+                                    mesmo_horario = True
+                                
+                                ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
+                                
+                                if contexto_gerador or mesmo_horario or ambos_com_carga:
+                                    fechamentos_para_topologia.append(fe_post)
+                                elif not fechamentos_previos:
                                     falhas_r31b.append(
                                         f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}, horário '{hora_ab or dt_ab}') ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}, horário '{hora_fe or dt_fe}'). Intervalo de tempo entre etapas provoca corte/desligamento não programado de clientes."
                                     )
-                                else:
-                                    falhas_r31b.append(
-                                        f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
-                                    )
-                            else:
-                                # HOUVE FECHAMENTO PRÉVIO: Validação Topológica da Transferência de Carga!
-                                chaves_fechadas_nomes = [fe['eq'] for fe in fechamentos_previos]
+                                    falha_sequencia_detectada = True
+                                    break
+
+                            if not fechamentos_para_topologia and not falha_sequencia_detectada:
+                                falhas_r31b.append(
+                                    f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
+                                )
+                            elif fechamentos_para_topologia:
+                                # HOUVE FECHAMENTO PRÉVIO OU POSTERIOR ISENTO: Validação Topológica da Transferência de Carga!
+                                chaves_fechadas_nomes = [fe['eq'] for fe in fechamentos_para_topologia]
                                 grafo_cand = None
                                 alim_ab = mi_ab.get('alim') or mi_ab.get('alimentador') or ''
                                 if grafos_alimentadores:
