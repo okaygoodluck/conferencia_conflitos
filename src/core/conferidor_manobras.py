@@ -3199,20 +3199,24 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             elif re.search(r'\b\d*(MA02|MA66|MA67|MA19|MA23|MA25|MA55|MA57|MAB1)\b(?!\s*-\s*OUTROS)', txt) or re.search(r'\bFECHAR\b', txt):
                                 fechados_por_alim.setdefault(alim_key, []).append((eq_map, fases_eq))
         
-                    # Verifica incompatível apenas quando o MESMO alimentador tem tri aberto e mono fechado
-                    for alim_key in set(abertos_por_alim.keys()) & set(fechados_por_alim.keys()):
-                        abriu_tri = [e for e, f in abertos_por_alim[alim_key] if f == 'ABC']
-                        fechou_mono = [e for e, f in fechados_por_alim[alim_key] if f in ['A', 'B', 'C']]
-                        if abriu_tri and fechou_mono:
-                            falhas_r32 = True
-                            str_tri = ", ".join(abriu_tri)
-                            str_mono = ", ".join(fechou_mono)
-                            print_regra(32, "ERRO", f"Etapa '{eh_grupo}' (Alim {alim_key}): Abertura trifásica ({str_tri}) e fechamento monofásico ({str_mono}) na mesma etapa. Separe em etapas distintas.")
-                        elif abriu_tri or fechou_mono:
-                            teve_fases = True
+                    # Consolida todos os abertos e fechados da etapa, independente do alimentador
+                    abertos_na_etapa = []
+                    fechados_na_etapa = []
+                    for lst in abertos_por_alim.values(): abertos_na_etapa.extend(lst)
+                    for lst in fechados_por_alim.values(): fechados_na_etapa.extend(lst)
+
+                    abriu_tri = [e for e, f in abertos_na_etapa if f == 'ABC']
+                    fechou_mono = [e for e, f in fechados_na_etapa if f in ['A', 'B', 'C']]
+                    if abriu_tri and fechou_mono:
+                        falhas_r32 = True
+                        str_tri = ", ".join(abriu_tri)
+                        str_mono = ", ".join(fechou_mono)
+                        print_regra(32, "ERRO", f"Etapa '{eh_grupo}': Abertura trifásica ({str_tri}) e fechamento monofásico ({str_mono}) na mesma etapa. Caso seja transferência de carga, as fases são incompatíveis. Caso contrário, separe em etapas distintas.")
+                    elif abriu_tri or fechou_mono:
+                        teve_fases = True
     
                 if not falhas_r32 and teve_fases:
-                    print_regra(32, "OK", "Compatibilidade de fases validada nas transferências por alimentador.")
+                    print_regra(32, "OK", "Compatibilidade de fases validada na manobra.")
 
                 # REGRA 33 (MA30 ASTA sem carga)
                 print("🔹 Verificando Chave ASTA (Regra 33)...")
