@@ -69,7 +69,9 @@ URL_LOGIN = "http://gdis-pm/gdispm/"
 
 def _norm_eqpto(s):
     """Normaliza o número do equipamento para garantir que a comparação seja justa (ex: 24-123 vira 24 - 123)"""
-    s = re.sub(r"\s+", " ", (s or "")).strip()
+    if not s or str(s).strip() in ['-', '', '--']:
+        return ""
+    s = re.sub(r"\s+", " ", str(s)).strip()
     s = re.sub(r"\s*-\s*", " - ", s)
     return s
 
@@ -548,7 +550,11 @@ def _obter_prefixo_equipamento(eq, eq_data=None):
             if 'SECCIONADORA' in p_upper: return '28'
             if 'TRANSFORMADOR' in p_upper or 'TRAFO' in p_upper: return '01'
 
-    # Fallback por formato de string (ex: "22 - 12345" ou Regex de Trafo)
+    # Fallback por formato de string (ex: "22 - 12345", "DISJUNTOR MTZ 007" ou Regex de Trafo)
+    if 'DISJUNTOR' in str(eq).upper():
+        return "21"
+    if 'RELIGADOR' in str(eq).upper():
+        return "22"
     if re.match(r"^\d{5,7}\s*-\s*\d+\s*-\s*\d+$", str(eq)):
         return "01"
     if '-' in str(eq):
@@ -910,9 +916,29 @@ def _obter_fases_equipamento(eq_nome, eq_data=None, mi=None, sol_info=None):
     return 'ABC'
 
 def main(manobra_param=None, usuario_param=None, senha_param=None, headless=False, log_func=print, dados_equipamentos_cache=None):
-    # Sombreamento local para isolar logs por thread sem alterar 2000 linhas de código
+    erros_manobra_atual = []
+    alertas_manobra_atual = []
+    total_erros_lote = []
+    total_alertas_lote = []
+
     _global_print_regra = globals()['print_regra']
     def print_regra(regra_id, nivel, mensagem):
+        if nivel == "ERRO":
+            if isinstance(mensagem, (list, set)):
+                for m in mensagem:
+                    erros_manobra_atual.append((regra_id, m))
+                    total_erros_lote.append((regra_id, m))
+            else:
+                erros_manobra_atual.append((regra_id, mensagem))
+                total_erros_lote.append((regra_id, mensagem))
+        elif nivel == "ALERTA":
+            if isinstance(mensagem, (list, set)):
+                for m in mensagem:
+                    alertas_manobra_atual.append((regra_id, m))
+                    total_alertas_lote.append((regra_id, m))
+            else:
+                alertas_manobra_atual.append((regra_id, mensagem))
+                total_alertas_lote.append((regra_id, mensagem))
         _global_print_regra(regra_id, nivel, mensagem, log_func=log_func)
     
     def print(*args, **kwargs):
@@ -1005,6 +1031,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
         total_manobras = len(manobras_lista)
         for idx_m, manobra_num in enumerate(manobras_lista, start=1):
+            erros_manobra_atual.clear()
+            alertas_manobra_atual.clear()
             print("\n" + "="*80)
             print(f">>> MANOBRA_START: {manobra_num} ({idx_m}/{total_manobras})")
             print("="*80)
@@ -1811,6 +1839,26 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     if 'cronologia' not in item or not item['cronologia']:
                         item['cronologia'] = idx
                     eq = _norm_eqpto(item.get('equipamento'))
+                    alim = _norm_str(item.get('alimentador'))
+
+                    # Se a coluna Equipamento for vazia ou '-', mas houver Alimentador e ações de Subestação/Disjuntor
+                    if (not eq or eq == '-') and alim and alim != '-':
+                        txt_alvo = (str(item.get('texto_linha', '')) + " " + str(item.get('acao_bruta', ''))).upper()
+                        # Se houver menção explícita a código de chave/equipamento de campo (ex: 28 - 12345), prioriza
+                        m_eq_campo = re.search(r'\b(\d{2}\s*-\s*\d{4,8})\b', txt_alvo)
+                        if m_eq_campo and not any(w in txt_alvo for w in ["DISJUNTOR", "RELIGADOR", "DISJ", "RELIG"]):
+                            eq = _norm_eqpto(m_eq_campo.group(1))
+                        else:
+                            macros_se = [
+                                "MA18", "MA19", "MA06", "MA07", "MA80", "MA81", "MAA6",
+                                "MA14", "MA15", "MA16", "MA17", "MA77", "MA78",
+                                "MAC2", "MA26", "MA96", "MA97"
+                            ]
+                            tem_macro_se = any(re.search(r'\b\d*' + m + r'\b', txt_alvo, re.IGNORECASE) for m in macros_se)
+                            tem_texto_se = any(w in txt_alvo for w in ["DISJUNTOR", "RELIGADOR", "DISJ", "RELIG", "RN/ST", "SUBESTACAO", "SUBESTAÇÃO"])
+                            if tem_macro_se or tem_texto_se:
+                                eq = f"DISJUNTOR {alim}"
+
                     if not eq or eq == '-':
                         continue # Ignora etapas puramente de cabeçalho
                     if eq not in manobra_map:
@@ -2437,7 +2485,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     # o seu estado operacional de repouso no campo é ABERTO (NA).
                     # Se o cadastro estático for antigo (ou tiver alimentador divergente/contexto de gerador),
                     # a lógica da manobra prevalece para evitar falso-positivo em chaves NA.
-                    if acoes_cronologicas and acoes_cronologicas[0] == 'FECHAR' and 'ABRIR' in acoes_cronologicas[1:]:
+                    # Disjuntores de Subestação (entidade virtual DISJUNTOR <ALIM>) têm regime operacional NF por padrão de rede
+                    if str(eq).startswith("DISJUNTOR "):
+                        posope = 'F'
+                    elif acoes_cronologicas and acoes_cronologicas[0] == 'FECHAR' and 'ABRIR' in acoes_cronologicas[1:]:
                         if origem_cadastro != 'GDIS_AO_VIVO' or tem_indicativo_na or divergencia_circuito:
                             posope = 'A'
                     elif acoes_cronologicas and acoes_cronologicas[0] == 'ABRIR' and 'FECHAR' in acoes_cronologicas[1:]:
@@ -2482,7 +2533,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             # Equipamento sem ações de abertura/fechamento diretas (apenas bloqueio ou sinalização)
                             # Para Religadores (prefixo 22) e Disjuntores (prefixo 21): regime normal da rede é NF (Fechado).
                             tem_bloqueio_relig = any(re.search(r'\b\d*(MA14|MA15|MA16|MA17|MA21|MA28)\b', mi.get('texto_linha', ''), re.IGNORECASE) for mi in manobra_items)
-                            if prefixo in ['21', '22'] or tem_bloqueio_relig:
+                            if prefixo in ['21', '22'] or tem_bloqueio_relig or str(eq).startswith("DISJUNTOR "):
                                 posope = 'F'
                                 print_regra(31, "INFO", f"Equipamento '{eq}' (Religador/Disjuntor): Regime operacional determinado como NF (Normalmente Fechado) por padrão de rede.")
                             elif (eq in sol_dict or any(_get_eq_id(k) == _get_eq_id(eq) for k in sol_dict)) and not tem_indicativo_na:
@@ -2545,7 +2596,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             if not primeira_acao: primeira_acao = 'ABRIR'
                             # Só emite erro se há certeza de que estava ABERTO (posope=A confirmado)
                             if estado_simulado == 'A':
-                                msg = "Tentativa de Abertura em equipamento que já consta como Aberto (NA/POSOPE=A)"
+                                if str(eq).startswith("DISJUNTOR "):
+                                    msg = "Tentativa de Abertura (MA18) em disjuntor que já se encontra aberto (POSOPE=A)"
+                                else:
+                                    msg = "Tentativa de Abertura em equipamento que já consta como Aberto (NA/POSOPE=A)"
                                 erro_31.append(msg)
                             estado_simulado = 'A'
                         elif is_fechamento:
@@ -2553,7 +2607,10 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             # Só emite erro se há certeza de que estava FECHADO (posope=F confirmado).
                             # Quando o estado é desconhecido (''), fechar é operação válida (equipamento NA → NF).
                             if estado_simulado == 'F':
-                                msg = "Tentativa de Fechamento em equipamento que já consta como Fechado (NF/POSOPE=F)"
+                                if str(eq).startswith("DISJUNTOR "):
+                                    msg = "Tentativa de Fechamento (MA19) em disjuntor que já se encontra fechado (NF/POSOPE=F)"
+                                else:
+                                    msg = "Tentativa de Fechamento em equipamento que já consta como Fechado (NF/POSOPE=F)"
                                 erro_31.append(msg)
                             estado_simulado = 'F'
 
@@ -3026,6 +3083,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         "Bloq RA COD (MA52/MA53)": (["MA52"], ["MA53"]),
                         "Barramento (MA24/MA25)": (["MA24"], ["MA25"]),
                         "Disjuntor/Relig. (MA18/MA19)": (["MA18"], ["MA19"]),
+                        "Entrega/Liberação PLE (MA80/MA81 -> MAA6)": (["MA80", "MA81"], ["MAA6"]),
                         "PLE (MA96/MA97)": (["MA96"], ["MA97"]),
                         "Subestação (MA22/MA23)": (["MA22"], ["MA23"]),
                         "Bloq RA Genérico (MA04/MA05)": (["MA04"], ["MA05"]),
@@ -3065,7 +3123,9 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                     for mi in manobra_items:
                         etapa_txt = (mi.get('etapa_nome', '') + ' ' + mi.get('etapa_texto_header', '')).upper()
-                        if "DESLIGAMENTO" in etapa_txt: passou_deslig = True
+                        cron = mi.get('cronologia', 0)
+                        if "DESLIGAMENTO" in etapa_txt or (limite_cronologia_desligamento != -1 and cron > limite_cronologia_desligamento):
+                            passou_deslig = True
             
                         txt = mi['texto_linha'].upper()
                         obs = mi.get('observacao', '').upper()
@@ -3091,6 +3151,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                             for m_ab in aberturas:
                                 if re.search(_re_macro(m_ab), txt):
+                                    if m_ab == "MA09" and ("ANORMALIDADE" in txt or str(eq).startswith("DISJUNTOR ") or is_alim):
+                                        continue
                                     saldos[nome_grupo] += 1
                                     teve_rastreio_inversa = True
                             for m_fe in fechamentos:
@@ -3144,6 +3206,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         for nome_grupo, (aberturas, fechamentos) in rastreamento_inversas.items():
                             for m_ab in aberturas:
                                 if re.search(_re_macro(m_ab), txt):
+                                    if m_ab == "MA09" and ("ANORMALIDADE" in txt or str(eq).startswith("DISJUNTOR ") or is_alim):
+                                        continue
                                     saldos_crono[nome_grupo] += 1
                                     teve_acao_crono = True
                 
@@ -3153,7 +3217,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                                     # fechamento sem abertura prévia. Na verdade, operações de chaveamento
                                     # devem ser ignoradas da regra de pré-condição estrita da Regra 30.
                                     if saldos_crono[nome_grupo] <= 0:
-                                        if nome_grupo not in ["Abertura Simples (MA01/MA02)", "Abertura (MA31/MA66)", "At/Sinaliz. (MA30/MA67)", "Disjuntor/Relig. (MA18/MA19)", "Subestação (MA22/MA23)", "Barramento (MA24/MA25)", "Rede BT (MA56/MA57)", "Rede MT (MA54/MA55)", "By-pass (MA09/MA10)"]:
+                                        if nome_grupo not in ["Abertura Simples (MA01/MA02)", "Abertura (MA31/MA66)", "At/Sinaliz. (MA30/MA67)", "Disjuntor/Relig. (MA18/MA19)", "Entrega/Liberação PLE (MA80/MA81 -> MAA6)", "Subestação (MA22/MA23)", "Barramento (MA24/MA25)", "Rede BT (MA56/MA57)", "Rede MT (MA54/MA55)", "By-pass (MA09/MA10)"]:
                                             falhas_r30.add(f"'{m_fe}' sem '{'/'.join(aberturas)}' prévio")
                                     else:
                                         saldos_crono[nome_grupo] -= 1
@@ -3187,6 +3251,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     fechados_por_alim = {}  # alim -> [(eq, fases)]
         
                     for eq_map, m_items in manobra_map.items():
+                        if str(eq_map).startswith("DISJUNTOR "):
+                            continue
                         for mi in m_items:
                             if get_etapa_ident(mi) != eh_grupo: continue
                             txt = mi['texto_linha'].upper()
@@ -3417,78 +3483,100 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
 
                         fechamentos_previos = [fe for fe in fechamentos_tensao if fe['cron'] <= cron_ab]
 
-                        eh_etapa_desligamento = any(w in et_ab.upper() for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"])
-                        eh_transferencia_ativa = bool(fechamentos_previos) or (not eh_etapa_desligamento and not is_solicitacao_boundary)
+                        eh_etapa_desligamento = any(w in et_ab.upper() for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]) or any(
+                            w in (str(mi_ab.get('etapa_nome', '')) + ' ' + str(mi_ab.get('etapa_texto_header', ''))).upper()
+                            for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"]
+                        )
 
-                        if not is_solicitacao_boundary or eh_transferencia_ativa:
-                            fechamentos_posteriores = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
-                            fechamentos_para_topologia = list(fechamentos_previos)
-                            falha_sequencia_detectada = False
+                        # Aberturas em etapas de Desligamento/Corte/Isolamento são para desenergização
+                        # e isolamento da área de trabalho (obras), NÃO transferência de carga.
+                        if eh_etapa_desligamento:
+                            continue
+
+                        # Se o equipamento é fronteira/delimitador da solicitação (Local de Interrupção):
+                        # Só é avaliado como transferência se estiver ocorrendo em etapa prévia de manobra
+                        # com fechamento associado na mesma etapa/bloco ou mesmo horário.
+                        if is_solicitacao_boundary:
+                            fechamentos_etapa = [
+                                fe for fe in fechamentos_tensao
+                                if fe['etapa'] == et_ab or fe.get('mi', {}).get('grupo_id') == mi_ab.get('grupo_id') or fe.get('cron') == cron_ab
+                            ]
+                            if not fechamentos_etapa:
+                                continue
+
+                        fechamentos_posteriores = [fe for fe in fechamentos_tensao if fe['cron'] > cron_ab]
+                        fechamentos_para_topologia = list(fechamentos_previos)
+                        falha_sequencia_detectada = False
+                        
+                        for fe_post in fechamentos_posteriores:
+                            mi_fe = fe_post['mi']
+                            txt_fe = mi_fe.get('texto_linha', '').upper()
+                            obs_fe = mi_fe.get('observacao', '').upper()
+                            texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
                             
-                            for fe_post in fechamentos_posteriores:
-                                mi_fe = fe_post['mi']
-                                txt_fe = mi_fe.get('texto_linha', '').upper()
-                                obs_fe = mi_fe.get('observacao', '').upper()
-                                texto_completo_fe = f"{fe_post['eq']} {obs_fe} {txt_fe}"
-                                
-                                # Contexto de GERADOR / GBT / GMT / UGTM:
-                                contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
-                                                       for k in ["GERADOR", "GBT", "GMT", "UGTM"])
-                                
-                                dt_ab = (mi_ab.get('data_hora') or '').strip()
-                                dt_fe = (mi_fe.get('data_hora') or '').strip()
-                                header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
-                                header_fe = (mi_fe.get('etapa_texto_header') or '').strip()
-                                
-                                m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_ab or header_ab)
-                                m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_fe or header_fe)
-                                hora_ab = m_dt_ab.group(0) if m_dt_ab else ""
-                                hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
-                                
-                                mesmo_horario = False
-                                if hora_ab and hora_fe and (hora_ab == hora_fe) or mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id') or et_ab == fe_post['etapa']:
-                                    mesmo_horario = True
-                                
-                                ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
-                                
-                                if contexto_gerador or mesmo_horario or ambos_com_carga:
-                                    fechamentos_para_topologia.append(fe_post)
-                                elif not fechamentos_previos:
-                                    falhas_r31b.append(
-                                        f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}, horário '{hora_ab or dt_ab}') ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}, horário '{hora_fe or dt_fe}'). Intervalo de tempo entre etapas provoca corte/desligamento não programado de clientes."
-                                    )
-                                    falha_sequencia_detectada = True
-                                    break
-
-                            if not fechamentos_para_topologia and not falha_sequencia_detectada:
+                            # Contexto de GERADOR / GBT / GMT / UGTM:
+                            contexto_gerador = any(k in (texto_completo_ab + " " + texto_completo_fe)
+                                                   for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+                            
+                            dt_ab = (mi_ab.get('data_hora') or '').strip()
+                            dt_fe = (mi_fe.get('data_hora') or '').strip()
+                            header_ab = (mi_ab.get('etapa_texto_header') or '').strip()
+                            header_fe = (mi_fe.get('etapa_texto_header') or '').strip()
+                            
+                            m_dt_ab = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_ab or header_ab)
+                            m_dt_fe = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})|(\b\d{2}:\d{2}\b)', dt_fe or header_fe)
+                            hora_ab = m_dt_ab.group(0) if m_dt_ab else ""
+                            hora_fe = m_dt_fe.group(0) if m_dt_fe else ""
+                            
+                            mesmo_horario = False
+                            if hora_ab and hora_fe and (hora_ab == hora_fe) or mi_ab.get('grupo_id') and mi_ab.get('grupo_id') == mi_fe.get('grupo_id') or et_ab == fe_post['etapa']:
+                                mesmo_horario = True
+                            
+                            ambos_com_carga = ("COM CARGA" in txt_ab or "COM CARGA" in obs_ab) and ("COM CARGA" in txt_fe or "COM CARGA" in obs_fe)
+                            
+                            if contexto_gerador or mesmo_horario or ambos_com_carga:
+                                fechamentos_para_topologia.append(fe_post)
+                            elif not fechamentos_previos:
                                 falhas_r31b.append(
-                                    f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
+                                    f"Sequência de transferência invertida no equipamento '{eq_ab}': ABERTURA realizada na {et_ab} (cronologia {cron_ab}, horário '{hora_ab or dt_ab}') ANTES do FECHAMENTO do socorro '{fe_post['eq']}' na {fe_post['etapa']} (cronologia {fe_post['cron']}, horário '{hora_fe or dt_fe}'). Intervalo de tempo entre etapas provoca corte/desligamento não programado de clientes."
                                 )
-                            elif fechamentos_para_topologia:
-                                # HOUVE FECHAMENTO PRÉVIO OU POSTERIOR ISENTO: Validação Topológica da Transferência de Carga!
-                                chaves_fechadas_nomes = [fe['eq'] for fe in fechamentos_para_topologia]
-                                grafo_cand = None
-                                alim_ab = mi_ab.get('alim') or mi_ab.get('alimentador') or ''
-                                if grafos_alimentadores:
-                                    if alim_ab:
-                                        grafo_cand = grafos_alimentadores.get(alim_ab) or grafos_alimentadores.get(_norm_alim(alim_ab))
-                                    if not grafo_cand:
-                                        for g_v in grafos_alimentadores.values():
-                                            if hasattr(g_v, 'obter_ids_por_numeq') and g_v.obter_ids_por_numeq(eq_ab):
-                                                grafo_cand = g_v
-                                                break
+                                falha_sequencia_detectada = True
+                                break
 
-                                if grafo_cand and hasattr(grafo_cand, 'validar_transferencia_carga'):
-                                    res_transf = grafo_cand.validar_transferencia_carga(chaves_fechadas_nomes, eq_ab)
-                                    if not res_transf.get("valido", True):
-                                        total_j = res_transf.get("total_jusante", 0)
-                                        ch_sug = res_transf.get("chaves_sugeridas", [])
-                                        sug_txt = f" Chave(s) NA indicada(s) para socorro deste trecho: {', '.join(ch_sug)}." if ch_sug else ""
-                                        fe_nomes_str = ', '.join([f"'{c}'" for c in chaves_fechadas_nomes])
-                                        motivo_grafo = res_transf.get("motivo") or f"a chave fechada {fe_nomes_str} não conecta à zona a jusante"
-                                        falhas_r31b.append(
-                                            f"Transferência de carga inválida com tensão no equipamento '{eq_ab}' na {et_ab}: {motivo_grafo} ({total_j} equipamentos/clientes ficariam sem tensão, provocando desligamento indevido de clientes).{sug_txt}"
-                                        )
+                        if not fechamentos_para_topologia and not falha_sequencia_detectada:
+                            falhas_r31b.append(
+                                f"Equipamento de tronco '{eq_ab}' foi ABERTO com tensão na {et_ab} sem nenhum FECHAMENTO prévio de chave de socorro/interligação. Risco de desenergização indevida da carga."
+                            )
+                        elif fechamentos_para_topologia:
+                            # HOUVE FECHAMENTO PRÉVIO OU POSTERIOR ISENTO: Validação Topológica da Transferência de Carga!
+                            chaves_fechadas_nomes = [fe['eq'] for fe in fechamentos_para_topologia]
+                            grafo_cand = None
+                            alim_ab = mi_ab.get('alim') or mi_ab.get('alimentador') or ''
+                            if grafos_alimentadores:
+                                if alim_ab:
+                                    grafo_cand = grafos_alimentadores.get(alim_ab) or grafos_alimentadores.get(_norm_alim(alim_ab))
+                                if not grafo_cand:
+                                    for g_v in grafos_alimentadores.values():
+                                        if hasattr(g_v, 'obter_ids_por_numeq') and g_v.obter_ids_por_numeq(eq_ab):
+                                            grafo_cand = g_v
+                                            break
+
+                            tem_gerador_transferencia = any(
+                                any(k in (str(fe.get('mi', {}).get('texto_linha', '')) + ' ' + str(fe.get('mi', {}).get('observacao', ''))).upper() for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+                                for fe in fechamentos_para_topologia
+                            ) or any(k in texto_completo_ab for k in ["GERADOR", "GBT", "GMT", "UGTM"])
+
+                            if not tem_gerador_transferencia and grafo_cand and hasattr(grafo_cand, 'validar_transferencia_carga'):
+                                res_transf = grafo_cand.validar_transferencia_carga(chaves_fechadas_nomes, eq_ab)
+                                if not res_transf.get("valido", True):
+                                    total_j = res_transf.get("total_jusante", 0)
+                                    ch_sug = res_transf.get("chaves_sugeridas", [])
+                                    sug_txt = f" Chave(s) NA indicada(s) para socorro deste trecho: {', '.join(ch_sug)}." if ch_sug else ""
+                                    fe_nomes_str = ', '.join([f"'{c}'" for c in chaves_fechadas_nomes])
+                                    motivo_grafo = res_transf.get("motivo") or f"a chave fechada {fe_nomes_str} não conecta à zona a jusante"
+                                    falhas_r31b.append(
+                                        f"Transferência de carga inválida com tensão no equipamento '{eq_ab}' na {et_ab}: {motivo_grafo} ({total_j} equipamentos/clientes ficariam sem tensão, provocando desligamento indevido de clientes).{sug_txt}"
+                                    )
 
                 if falhas_r31b:
                     for f in set(falhas_r31b):
@@ -3655,9 +3743,20 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 # FIM DA VERIFICAÇÃO
                 # ============================================================
 
-                print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
-                print(f"   VERIFICAÇÃO DA MANOBRA {manobra_num} CONCLUÍDA COM SUCESSO!   ")
-                print("="*57 + f"{Colors.RESET}")
+                if erros_manobra_atual:
+                    qtd_erros = len(erros_manobra_atual)
+                    print("\n" + f"{Colors.RED}{Colors.BOLD}" + "="*57)
+                    print(f"   VERIFICAÇÃO DA MANOBRA {manobra_num} FINALIZADA COM {qtd_erros} FALHA(S)!   ")
+                    print("="*57 + f"{Colors.RESET}")
+                elif alertas_manobra_atual:
+                    qtd_alertas = len(alertas_manobra_atual)
+                    print("\n" + f"{Colors.YELLOW}{Colors.BOLD}" + "="*57)
+                    print(f"   VERIFICAÇÃO DA MANOBRA {manobra_num} CONCLUÍDA COM {qtd_alertas} ALERTA(S)!   ")
+                    print("="*57 + f"{Colors.RESET}")
+                else:
+                    print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
+                    print(f"   VERIFICAÇÃO DA MANOBRA {manobra_num} CONCLUÍDA COM SUCESSO!   ")
+                    print("="*57 + f"{Colors.RESET}")
             except Exception as e_manobra:  # noqa: BLE001
                 print(f"\n❌ [ERRO NO PROCESSAMENTO DA MANOBRA {manobra_num}]: {e_manobra}")
                 try:
@@ -3682,9 +3781,20 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         except Exception as e:  # noqa: BLE001
             print(f"[DEBUG] Ignored error: {e}")
 
-    print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
-    print("      LOTE DE MANOBRAS CONCLUÍDO COM SUCESSO!         ")
-    print("="*57 + f"{Colors.RESET}")
+    if total_erros_lote:
+        qtd_total = len(total_erros_lote)
+        print("\n" + f"{Colors.RED}{Colors.BOLD}" + "="*57)
+        print(f"      LOTE FINALIZADO COM {qtd_total} FALHA(S)/ERRO(S)!       ")
+        print("="*57 + f"{Colors.RESET}")
+    elif total_alertas_lote:
+        qtd_total_al = len(total_alertas_lote)
+        print("\n" + f"{Colors.YELLOW}{Colors.BOLD}" + "="*57)
+        print(f"      LOTE CONCLUÍDO COM {qtd_total_al} ALERTA(S)!         ")
+        print("="*57 + f"{Colors.RESET}")
+    else:
+        print("\n" + f"{Colors.GREEN}{Colors.BOLD}" + "="*57)
+        print("      LOTE DE MANOBRAS CONCLUÍDO COM SUCESSO!         ")
+        print("="*57 + f"{Colors.RESET}")
     
     if not manobra_param:
         input("\nPressione Enter para encerrar...")

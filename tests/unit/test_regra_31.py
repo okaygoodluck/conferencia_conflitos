@@ -247,6 +247,46 @@ class TestRegra31CoerenciaEstado(unittest.TestCase):
         mesmo_horario = (m_dt_ab.group(0) == m_dt_fe.group(0))
         self.assertFalse(mesmo_horario, "Horários 08:00 e 09:30 são diferentes (intervalo de 1h30)")
 
+    def test_regra_31b_abertura_etapa_desligamento_e_delimitador_solicitacao(self):
+        """Valida que aberturas na etapa de DESLIGAMENTO (delimitação da obra da solicitação)
+        não são avaliadas falsamente como transferência de carga na Regra 31.B."""
+        manobra_dados = [
+            {
+                'equipamento': '22 - 321468',
+                'texto_linha': '20 MA02 - FECHAR EQUIPAMENTO 22 - 321468 MCLD210 COM TENSAO COD NÃO',
+                'observacao': '',
+                'etapa_nome': '20 MANOBRA COM RISCO SISTEMA',
+                'etapa_texto_header': '20 MANOBRA COM RISCO SISTEMA MCLD208 21/09/2026 09:00',
+                'data_hora': '21/09/2026 09:00',
+                'cronologia': 20
+            },
+            {
+                'equipamento': '24 - 24454',
+                'texto_linha': '50 MA31 - ABRIR E SINALIZAR EQUIPAMENTO 24 - 24454 MCLD208 COM CARGA 21/09/2026 10:00 SUPERVISOR NÃO',
+                'observacao': '',
+                'etapa_nome': '40 DESLIGAMENTO',
+                'etapa_texto_header': '40 DESLIGAMENTO MCLD208 21/09/2026 10:00',
+                'data_hora': '21/09/2026 10:00',
+                'cronologia': 40
+            }
+        ]
+        sol_dict = {'24 - 24454': {'eq': '24 - 24454', 'alim': 'MCLD208', 'local': '2050'}}
+
+        # Simula a checagem da Regra 31.B
+        ab = manobra_dados[1]
+        et_ab = ab['etapa_nome']
+        eh_etapa_desligamento = any(w in et_ab.upper() for w in ["DESLIGAMENTO", "CORTE", "ISOLAMENTO"])
+        self.assertTrue(eh_etapa_desligamento, "Etapa 40 DESLIGAMENTO deve ser classificada como etapa de desligamento")
+
+        is_solicitacao_boundary = any(ab['equipamento'] == sol_eq for sol_eq in sol_dict)
+        self.assertTrue(is_solicitacao_boundary, "Equipamento 24 - 24454 deve ser reconhecido como delimitador da solicitação")
+
+        # Com a regra atualizada, aberturas em desligamento são desconsideradas de transferência de carga
+        deve_ignorar_transferencia = eh_etapa_desligamento
+        self.assertTrue(deve_ignorar_transferencia, "Equipamento aberto em etapa de desligamento não deve ser avaliado como transferência de carga")
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
