@@ -2089,18 +2089,52 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         if dt_indiv_fim: lim_fim = dt_indiv_fim
             
                     falhas_r26 = []
-                    # Valida antecipação (Apenas se houver início de desligamento identificado)
-                    if lim_ini and ini_man_real and ini_man_real < lim_ini:
-                        falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
-        
-                    # Valida término
-                    if lim_fim and fim_man > lim_fim:
-                        falhas_r26.append(f"Término tardio ({fim_man.strftime('%H:%M')}) vs Autorizado ({lim_fim.strftime('%H:%M')})")
-            
+                    alertas_r26 = []
+
+                    if lim_ini and ini_man_real and lim_fim and fim_man:
+                        from datetime import timedelta
+                        # Alinha a data de referência para comparar a janela horária diária da interrupção
+                        data_ref = ini_man_real.date()
+                        sol_ini_ref = datetime.combine(data_ref, lim_ini.time())
+
+                        # Suporte a janelas de interrupção noturna (ex: 22:00 às 04:00 do dia seguinte)
+                        if lim_fim.time() < lim_ini.time():
+                            sol_fim_ref = datetime.combine(data_ref + timedelta(days=1), lim_fim.time())
+                        else:
+                            sol_fim_ref = datetime.combine(data_ref, lim_fim.time())
+
+                        ini_man_ref = datetime.combine(data_ref, ini_man_real.time())
+                        if fim_man.time() < ini_man_real.time():
+                            fim_man_ref = datetime.combine(data_ref + timedelta(days=1), fim_man.time())
+                        else:
+                            fim_man_ref = datetime.combine(data_ref, fim_man.time())
+
+                        # Valida antecipação do desligamento
+                        if ini_man_ref < sol_ini_ref:
+                            falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
+
+                        # Valida término tardio
+                        if fim_man_ref > sol_fim_ref:
+                            falhas_r26.append(f"Término tardio ({fim_man.strftime('%H:%M')}) vs Autorizado ({lim_fim.strftime('%H:%M')})")
+
+                        # Se os horários baterem, mas a data de calendário da manobra for diferente da solicitação
+                        if ini_man_real.date() != lim_ini.date():
+                            alertas_r26.append(f"Data programada ({ini_man_real.strftime('%d/%m/%Y')}) difere da data da solicitação ({lim_ini.strftime('%d/%m/%Y')})")
+
+                    elif lim_ini and ini_man_real:
+                        if ini_man_real.time() < lim_ini.time():
+                            falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
+                    elif lim_fim and fim_man:
+                        if fim_man.time() > lim_fim.time():
+                            falhas_r26.append(f"Término tardio ({fim_man.strftime('%H:%M')}) vs Autorizado ({lim_fim.strftime('%H:%M')})")
+
                     if falhas_r26:
                         msg_f = " e ".join(falhas_r26)
                         tipo_msg = "ERRO" if not is_apoio else "ALERTA"
                         print_regra(26, tipo_msg, f"Equipamento '{eq}': Divergência no cronograma ({msg_f}). Ajuste o horário da etapa.")
+                    elif alertas_r26:
+                        msg_a = " e ".join(alertas_r26)
+                        print_regra(26, "ALERTA", f"Equipamento '{eq}': Horários validados ({ini_man_real.strftime('%H:%M')} às {fim_man.strftime('%H:%M')}), porém {msg_a}.")
                     else:
                         if not lim_ini or not lim_fim:
                             if not is_apoio and dt_sol_ini:
