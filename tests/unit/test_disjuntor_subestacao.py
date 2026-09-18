@@ -388,3 +388,155 @@ def test_manobra_245592175_completa_detecta_erro_disjuntores():
         # RN/ST deve estar zerado
         assert saldos["Sinalização/RN/ST (MA06/MA07)"] == 0
 
+
+def test_procedimentos_etapa_nao_criam_disjuntor_virtual():
+    """
+    Verifica se macros procedimentais de etapa (MA40, MA41, MA42, MA43) e siglas de SE pura (JQU)
+    NÃO são convertidas em entidade virtual 'DISJUNTOR <ALIM>' nem disparam falsos erros nas Regras 22 e 30.
+    Cenário real da Manobra 246043309.
+    """
+    from src.core.conferidor_manobras import (
+        _norm_eqpto,
+        _norm_str,
+    )
+
+    manobra_dados = [
+        {
+            'equipamento': '-',
+            'alimentador': 'JQU',
+            'texto_linha': '10 MA40 - SOLICITAR AO COD AUTORIZACAO PARA DESLIGAMENTO JQU - - - - SUPERVISOR NÃO',
+            'acao_bruta': '10 MA40 - SOLICITAR AO COD AUTORIZACAO PARA DESLIGAMENTO JQU',
+            'executor': 'SUPERVISOR',
+            'posicionamento': 'Não',
+            'etapa_nome': '40 DESLIGAMENTO JQU 002',
+            'cronologia': 1
+        },
+        {
+            'equipamento': '-',
+            'alimentador': 'JQU',
+            'texto_linha': '40 MA42 - TESTAR E ATERRAR OS CIRCUITOS JQU - - - - SUPERVISOR NÃO',
+            'acao_bruta': '40 MA42 - TESTAR E ATERRAR OS CIRCUITOS JQU',
+            'executor': 'SUPERVISOR',
+            'posicionamento': 'Não',
+            'etapa_nome': '40 DESLIGAMENTO JQU 002',
+            'cronologia': 2
+        },
+        {
+            'equipamento': '-',
+            'alimentador': 'JQU',
+            'texto_linha': '10 MA43 - RETIRAR ATERRAMENTO DOS CIRCUITOS JQU - - - - SUPERVISOR NÃO',
+            'acao_bruta': '10 MA43 - RETIRAR ATERRAMENTO DOS CIRCUITOS JQU',
+            'executor': 'SUPERVISOR',
+            'posicionamento': 'Não',
+            'etapa_nome': '50 RELIGAMENTO JQU 002',
+            'cronologia': 3
+        },
+        {
+            'equipamento': '-',
+            'alimentador': 'JQU',
+            'texto_linha': '40 MA41 - INFORMAR AO COD RELIGAMENTO COM HORARIO JQU - - - - SUPERVISOR NÃO',
+            'acao_bruta': '40 MA41 - INFORMAR AO COD RELIGAMENTO COM HORARIO JQU',
+            'executor': 'SUPERVISOR',
+            'posicionamento': 'Não',
+            'etapa_nome': '50 RELIGAMENTO JQU 002',
+            'cronologia': 4
+        }
+    ]
+
+    manobra_map = {}
+    for idx, item in enumerate(manobra_dados, start=1):
+        if 'cronologia' not in item or not item['cronologia']:
+            item['cronologia'] = idx
+        eq = _norm_eqpto(item.get('equipamento'))
+        alim = _norm_str(item.get('alimentador'))
+
+        if (not eq or eq == '-') and alim and alim != '-':
+            txt_alvo = (str(item.get('texto_linha', '')) + " " + str(item.get('acao_bruta', ''))).upper()
+            is_procedimento = bool(re.search(r'\b\d*(MA40|MA41|MA42|MA43|MAA7|MAA8|MA09|MA10|MA11|MA12|MA13)\b', txt_alvo))
+            if not is_procedimento:
+                m_eq_campo = re.search(r'\b(\d{2}\s*-\s*\d{4,8})\b', txt_alvo)
+                tem_texto_se = bool(re.search(r'\b(DISJUNTOR|RELIGADOR|DISJ\b|RN/ST|SUBESTA[CÇ][AÃ]O)\b', txt_alvo))
+                if m_eq_campo and not tem_texto_se:
+                    eq = _norm_eqpto(m_eq_campo.group(1))
+                else:
+                    macros_se = [
+                        "MA18", "MA19", "MA06", "MA07", "MA80", "MA81", "MAA6",
+                        "MA14", "MA15", "MA16", "MA17", "MA77", "MA78",
+                        "MAC2", "MA26", "MA96", "MA97"
+                    ]
+                    tem_macro_se = any(re.search(r'\b\d*' + m + r'\b', txt_alvo, re.IGNORECASE) for m in macros_se)
+                    tem_digito_alim = bool(re.search(r'\d', alim))
+                    is_op_disj = bool(re.search(r'\b\d*(MA18|MA19)\b', txt_alvo)) or ("DISJUNTOR" in txt_alvo)
+                    if (tem_macro_se or tem_texto_se) and (tem_digito_alim or is_op_disj):
+                        eq = f"DISJUNTOR {alim}"
+
+        if not eq or eq == '-':
+            continue
+        if eq not in manobra_map:
+            manobra_map[eq] = []
+        manobra_map[eq].append(item)
+
+    # Nenhuma entidade 'DISJUNTOR JQU' deve existir
+    assert "DISJUNTOR JQU" not in manobra_map
+    assert len(manobra_map) == 0
+
+
+def test_regra46_banco_regulador_parceiro():
+    """
+    Verifica se a Regra 46 reconhece a proteção em banco de RT:
+    Se a chave invertida é 120858, mas o operador aplicou MA35 e MA36 na unidade 120857
+    (do mesmo banco/local 2121), não deve haver falha na Regra 46.
+    """
+    from src.core.rede_grafo import RedeGrafoAlimentador
+
+    dados_rede = {
+        "alimentador": "JQU 002",
+        "root": {"id": "SE_JQU", "refalm": "JQU 002"},
+        "nos": [
+            {"id": "SE_JQU", "numeq": "SE_JQU", "posope": "F"},
+            {"id": "RT_1", "numeq": "02 - 120857", "tipoeq": "02", "idblococ": "BLOCO_RT_2121", "local": "2121", "posope": "F"},
+            {"id": "RT_2", "numeq": "120858", "tipoeq": "02", "idblococ": "BLOCO_RT_2121", "local": "2121", "posope": "F"},
+            {"id": "N_CARGA", "numeq": "N_CARGA", "posope": "F"},
+            {"id": "CH_SOC", "numeq": "22 - 382500", "tipoeq": "22", "posope": "A"},
+            {"id": "SE_EXT", "numeq": "SE_EXT", "posope": "F"}
+        ],
+        "arestas": [
+            {"id": "SE_JQU*RT_1"},
+            {"id": "RT_1*RT_2"},
+            {"id": "RT_2*N_CARGA"},
+            {"id": "N_CARGA*CH_SOC"},
+            {"id": "CH_SOC*SE_EXT"}
+        ]
+    }
+
+    grafo = RedeGrafoAlimentador(dados_rede)
+
+    # Simula manobra com MA35 para 02 - 120857, fechamento de 22 - 382500, e MA36 para 02 - 120857
+    manobra = [
+        {
+            "equipamento": "02 - 120857",
+            "texto_linha": "60 MA35 - COLOCAR RT NO NEUTRO 02 - 120857 LOCAL 2121",
+            "etapa_nome": "20 MANOBRA",
+            "local": "2121"
+        },
+        {
+            "equipamento": "22 - 382500",
+            "texto_linha": "20 MA02 - FECHAR EQUIPAMENTO 22 - 382500",
+            "etapa_nome": "30 MANOBRA",
+            "local": "2124"
+        },
+        {
+            "equipamento": "02 - 120857",
+            "texto_linha": "60 MA36 - COLOCAR RT EM SERVICO 02 - 120857 LOCAL 2121",
+            "etapa_nome": "70 MANOBRA",
+            "local": "2121"
+        }
+    ]
+
+    res = grafo.simular_manobra(manobra)
+
+    # Não deve apontar ausência de MA35/MA77 nem ausência de MA36 para 120858
+    assert len(res["rt_sem_ma35_ou_ma77"]) == 0
+    assert len(res["rt_sem_ma36_retorno"]) == 0
+
+

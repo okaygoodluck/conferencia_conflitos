@@ -203,6 +203,54 @@ class RedeGrafoAlimentador:
                 reguladores.append(no)
         return reguladores
 
+    def obter_parceiros_banco_regulador(self, rt_no: dict) -> list[dict]:
+        """
+        Retorna outros nós de regulador de tensão que pertencem ao mesmo banco
+        físico/operacional (ex: banco trifásico composto por unidades monofásicas).
+        Critérios de pareamento:
+        1. Mesmo 'idblococ' (bloco de conexão elétrico comum).
+        2. Mesmo código de 'local' / 'numloc' / 'codloc'.
+        3. Proximidade topológica direta no G_fisico (distância <= 2 entre reguladores).
+        """
+        if not rt_no or not isinstance(rt_no, dict):
+            return []
+
+        nid = str(rt_no.get("id", "")).strip()
+        bloco = rt_no.get("idblococ")
+        loc_rt = str(rt_no.get("local") or rt_no.get("numloc") or rt_no.get("codloc") or "").strip().upper()
+        if loc_rt in ["-", "NONE", "NULL"]:
+            loc_rt = ""
+
+        todos_rts = self.obter_reguladores_tensao()
+        parceiros = []
+
+        for outro in todos_rts:
+            outro_id = str(outro.get("id", "")).strip()
+            if not outro_id or outro_id == nid:
+                continue
+
+            outro_bloco = outro.get("idblococ")
+            outro_loc = str(outro.get("local") or outro.get("numloc") or outro.get("codloc") or "").strip().upper()
+            if outro_loc in ["-", "NONE", "NULL"]:
+                outro_loc = ""
+
+            eh_parceiro = False
+            if (bloco and outro_bloco and bloco == outro_bloco) or (loc_rt and outro_loc and loc_rt == outro_loc):
+                eh_parceiro = True
+            elif nid and outro_id and self.G_fisico.has_node(nid) and self.G_fisico.has_node(outro_id):
+                try:
+                    if nx.has_path(self.G_fisico, nid, outro_id):
+                        dist = nx.shortest_path_length(self.G_fisico, nid, outro_id)
+                        if dist <= 2:
+                            eh_parceiro = True
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if eh_parceiro:
+                parceiros.append(outro)
+
+        return parceiros
+
     def obter_zona_jusante_regulador(self, reg_numeq_ou_id: str) -> set[str]:
         """
         Calcula o componente/zona a jusante (lado de carga) de um Regulador de Tensão
@@ -711,20 +759,55 @@ class RedeGrafoAlimentador:
                 )
                 for rt in rts_invertidos:
                     rt_num = str(rt.get("numeq"))
-                    if rt_num in rts_invertidos_ja_detectados:
-                        # Já registrado na etapa de transferência; evita redundâncias em normalizações
-                        continue
-                    rts_invertidos_ja_detectados.add(rt_num)
+                    # Identifica todos os RTs pertencentes ao mesmo banco físico/elétrico
+                    parceiros = self.obter_parceiros_banco_regulador(rt)
+                    todos_banco = [rt] + parceiros
+                    identificadores_banco = set()
+                    locais_banco = set()
 
-                    rt_puro = _extrair_id_puro(rt_num)
+                    for p in todos_banco:
+                        p_num = str(p.get("numeq") or "").strip()
+                        if p_num and p_num != "-":
+                            identificadores_banco.add(p_num)
+                            p_puro = _extrair_id_puro(p_num)
+                            if p_puro:
+                                identificadores_banco.add(p_puro)
+                                identificadores_banco.add(p_puro.lstrip("0"))
+                        p_loc = str(p.get("local") or p.get("numloc") or p.get("codloc") or "").strip().upper()
+                        if p_loc and p_loc not in ["-", "NONE", "NULL"]:
+                            locais_banco.add(p_loc)
+
+                    # Cruzamento com itens da manobra que operem RTs no mesmo local
+                    for mi_cad in manobra_dados:
+                        eq_m = str(mi_cad.get("equipamento") or "").strip()
+                        loc_m = str(mi_cad.get("local") or "").strip().upper()
+                        txt_m_cad = str(mi_cad.get("texto_linha", "")).upper()
+                        if (loc_m and loc_m in locais_banco) or any(k in txt_m_cad for k in ["MA35", "MA36", "MA77"]):
+                            if loc_m and loc_m in locais_banco:
+                                if eq_m and eq_m != "-":
+                                    identificadores_banco.add(eq_m)
+                                    m_puro = _extrair_id_puro(eq_m)
+                                    if m_puro:
+                                        identificadores_banco.add(m_puro)
+
+                    if any(ident in rts_invertidos_ja_detectados for ident in identificadores_banco):
+                        # Já registrado na etapa de transferência através de outra fase do mesmo banco
+                        continue
+                    rts_invertidos_ja_detectados.update(identificadores_banco)
+
                     resultado["reguladores_invertidos"].append({
                         "regulador": rt_num,
                         "chave_fechada": eq,
                         "etapa": etapa,
-                        "item_idx": idx
+                        "item_idx": idx,
+                        "identificadores_banco": list(identificadores_banco),
+                        "locais_banco": list(locais_banco)
                     })
 
-                    macros_rt = macros_por_equipamento.get(rt_num, []) + macros_por_equipamento.get(rt_puro, [])
+                    macros_rt = []
+                    for ident in identificadores_banco:
+                        macros_rt.extend(macros_por_equipamento.get(ident, []))
+
                     tem_ma35_ou_ma77 = any(
                         m[1] in ["MA35", "MA77"] and (m[0] <= idx or m[2].strip().upper() == etapa.strip().upper())
                         for m in macros_rt
@@ -734,7 +817,10 @@ class RedeGrafoAlimentador:
                         for idx_m, mi_m in enumerate(manobra_dados):
                             et_m = _obter_nome_etapa(mi_m).strip().upper()
                             txt_m = str(mi_m.get("texto_linha", "")).upper()
-                            if (rt_num in txt_m or (rt_puro and rt_puro in txt_m)) and any(k in txt_m for k in ["MA35", "MA77", "NEUTRO", "FIXAR TAP"]):
+                            loc_m = str(mi_m.get("local", "")).strip().upper()
+                            match_eq = any(ident in txt_m for ident in identificadores_banco)
+                            match_loc = bool(locais_banco and loc_m in locais_banco and any(k in txt_m for k in ["02 -", "MA35", "MA77", "REGULADOR"]))
+                            if (match_eq or match_loc) and any(k in txt_m for k in ["MA35", "MA77", "NEUTRO", "FIXAR TAP"]):
                                 if idx_m <= idx or et_m == etapa.strip().upper():
                                     tem_ma35_ou_ma77 = True
                                     break
@@ -753,27 +839,36 @@ class RedeGrafoAlimentador:
                 chaves_abertas_simuladas.add(eq)
                 chaves_fechadas_simuladas.discard(eq)
 
-        # 3. Regra 46: Valida MA36 na recomposição para RTs invertidos (garante 1 por RT)
+        # 3. Regra 46: Valida MA36 na recomposição para RTs invertidos (garante 1 por banco de RT)
         rts_com_falha_ma36 = set()
         for item_inv in resultado["reguladores_invertidos"]:
             rt_num = item_inv["regulador"]
-            if rt_num in rts_com_falha_ma36:
+            identificadores_banco = set(item_inv.get("identificadores_banco", [rt_num, _extrair_id_puro(rt_num)]))
+            locais_banco = set(item_inv.get("locais_banco", []))
+
+            if any(ident in rts_com_falha_ma36 for ident in identificadores_banco):
                 continue
-            rt_puro = _extrair_id_puro(rt_num)
+
             idx_inv = item_inv["item_idx"]
-            macros_rt = macros_por_equipamento.get(rt_num, []) + macros_por_equipamento.get(rt_puro, [])
+            macros_rt = []
+            for ident in identificadores_banco:
+                macros_rt.extend(macros_por_equipamento.get(ident, []))
+
             tem_ma36 = any(m[1] == "MA36" and m[0] >= idx_inv for m in macros_rt)
             if not tem_ma36:
                 # Fallback textual para MA36 na etapa de recomposição/normalização
                 for idx_m, mi_m in enumerate(manobra_dados):
                     if idx_m >= idx_inv:
                         txt_m = str(mi_m.get("texto_linha", "")).upper()
-                        if (rt_num in txt_m or (rt_puro and rt_puro in txt_m)) and ("MA36" in txt_m or "SERVIÇO" in txt_m or "SERVICO" in txt_m):
+                        loc_m = str(mi_m.get("local", "")).strip().upper()
+                        match_eq = any(ident in txt_m for ident in identificadores_banco)
+                        match_loc = bool(locais_banco and loc_m in locais_banco and any(k in txt_m for k in ["02 -", "MA36", "REGULADOR"]))
+                        if (match_eq or match_loc) and ("MA36" in txt_m or "SERVIÇO" in txt_m or "SERVICO" in txt_m):
                             tem_ma36 = True
                             break
 
             if not tem_ma36:
-                rts_com_falha_ma36.add(rt_num)
+                rts_com_falha_ma36.update(identificadores_banco)
                 resultado["rt_sem_ma36_retorno"].append({
                     "regulador": rt_num,
                     "etapa_inversao": item_inv["etapa"]

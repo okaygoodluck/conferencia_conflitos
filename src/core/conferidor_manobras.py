@@ -1844,20 +1844,26 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     # Se a coluna Equipamento for vazia ou '-', mas houver Alimentador e ações de Subestação/Disjuntor
                     if (not eq or eq == '-') and alim and alim != '-':
                         txt_alvo = (str(item.get('texto_linha', '')) + " " + str(item.get('acao_bruta', ''))).upper()
-                        # Se houver menção explícita a código de chave/equipamento de campo (ex: 28 - 12345), prioriza
-                        m_eq_campo = re.search(r'\b(\d{2}\s*-\s*\d{4,8})\b', txt_alvo)
-                        if m_eq_campo and not any(w in txt_alvo for w in ["DISJUNTOR", "RELIGADOR", "DISJ", "RELIG"]):
-                            eq = _norm_eqpto(m_eq_campo.group(1))
-                        else:
-                            macros_se = [
-                                "MA18", "MA19", "MA06", "MA07", "MA80", "MA81", "MAA6",
-                                "MA14", "MA15", "MA16", "MA17", "MA77", "MA78",
-                                "MAC2", "MA26", "MA96", "MA97"
-                            ]
-                            tem_macro_se = any(re.search(r'\b\d*' + m + r'\b', txt_alvo, re.IGNORECASE) for m in macros_se)
-                            tem_texto_se = any(w in txt_alvo for w in ["DISJUNTOR", "RELIGADOR", "DISJ", "RELIG", "RN/ST", "SUBESTACAO", "SUBESTAÇÃO"])
-                            if tem_macro_se or tem_texto_se:
-                                eq = f"DISJUNTOR {alim}"
+                        # Ações puramente procedimentais de etapa (comunicação COD/Supervisor, aterramento, etc.)
+                        # NUNCA representam operação de equipamento disjuntor de subestação.
+                        is_procedimento = bool(re.search(r'\b\d*(MA40|MA41|MA42|MA43|MAA7|MAA8|MA09|MA10|MA11|MA12|MA13)\b', txt_alvo))
+                        if not is_procedimento:
+                            # Se houver menção explícita a código de chave/equipamento de campo (ex: 28 - 12345), prioriza
+                            m_eq_campo = re.search(r'\b(\d{2}\s*-\s*\d{4,8})\b', txt_alvo)
+                            tem_texto_se = bool(re.search(r'\b(DISJUNTOR|RELIGADOR|DISJ\b|RN/ST|SUBESTA[CÇ][AÃ]O)\b', txt_alvo))
+                            if m_eq_campo and not tem_texto_se:
+                                eq = _norm_eqpto(m_eq_campo.group(1))
+                            else:
+                                macros_se = [
+                                    "MA18", "MA19", "MA06", "MA07", "MA80", "MA81", "MAA6",
+                                    "MA14", "MA15", "MA16", "MA17", "MA77", "MA78",
+                                    "MAC2", "MA26", "MA96", "MA97"
+                                ]
+                                tem_macro_se = any(re.search(r'\b\d*' + m + r'\b', txt_alvo, re.IGNORECASE) for m in macros_se)
+                                tem_digito_alim = bool(re.search(r'\d', alim))
+                                is_op_disj = bool(re.search(r'\b\d*(MA18|MA19)\b', txt_alvo)) or ("DISJUNTOR" in txt_alvo)
+                                if (tem_macro_se or tem_texto_se) and (tem_digito_alim or is_op_disj):
+                                    eq = f"DISJUNTOR {alim}"
 
                     if not eq or eq == '-':
                         continue # Ignora etapas puramente de cabeçalho
@@ -3078,8 +3084,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         "Bloq RA Chave (MA28/MA29)": (["MA28"], ["MA29"]),
                         "Rede BT (MA56/MA57)": (["MA56"], ["MA57"]),
                         "Rede MT (MA54/MA55)": (["MA54"], ["MA55"]),
-                        "Aterramento (MA42/MA43)": (["MA42"], ["MA43"]),
-                        "Aut. COD Deslig. (MA40/MA41)": (["MA40"], ["MA41"]),
                         "Bloq RA COD (MA52/MA53)": (["MA52"], ["MA53"]),
                         "Barramento (MA24/MA25)": (["MA24"], ["MA25"]),
                         "Disjuntor/Relig. (MA18/MA19)": (["MA18"], ["MA19"]),
@@ -3089,7 +3093,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         "Bloq RA Genérico (MA04/MA05)": (["MA04"], ["MA05"]),
                         "Ajuste Alt. (MAA1/MAA2/MAA3/MA89)": (["MAA1", "MAA2", "MAA3"], ["MA89"]),
                         "Transf. Auto (MAA4/MAA5)": (["MAA4"], ["MAA4"]), # MAA4 vira MAA5 mas na volta? Geralmente MAA5
-                        "Aut. Manobrar (MAA7/MAA8)": (["MAA7"], ["MAA8"]),
                         "Intert/Aterramento (MAA9/MAB1)": (["MAA9"], ["MAB1"]),
                         "Test/At/Intert (MAB2/MAB3)": (["MAB2"], ["MAB3"]),
                         "Intertravar (MAB4/MAB5)": (["MAB4"], ["MAB5"]),
