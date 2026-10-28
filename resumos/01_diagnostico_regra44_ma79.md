@@ -27,3 +27,4 @@ O Conferidor exige a macro `MA79` (Confirmar Equipamento Comunicando) para qualq
 2. Em `validar_regra_44`, passar o registro do equipamento obtido de `dados_equipamentos` para `_verificar_telecontrole`.
 3. Ajustar `_verificar_telecontrole`: se o equipamento for prefixo `22`, mas operado exclusivamente pela Região/Equipe em campo, sem macro de telecontrole (MA64, MA79, MA14, etc.) e o cadastro GDIS indicar `telecontrolado == False` (ou não houver telecontrole indicado), classificar como manual (`telecontrolado = False`).
 4. Criar teste unitário em `tests/unit/test_regra_44.py` cobrindo etapa de pique com religador manual (sem exigência de MA79).
+

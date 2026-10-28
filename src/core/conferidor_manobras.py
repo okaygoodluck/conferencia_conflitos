@@ -477,7 +477,7 @@ def _consultar_topologia_gdis(context, cod_alim: str, usuario: str = "", log_fun
 
         if telecom == "S" or any(w in controle for w in ["telecontrolado", "remoto", "automacao", "automatico"]):
             telecontrolado = True
-        elif "manual" in controle or fases in ["A", "B", "C"]:
+        elif telecom in ["N", "NAO", "NÃO"] or "manual" in controle or fases in ["A", "B", "C"]:
             telecontrolado = False
         else:
             telecontrolado = None
@@ -614,6 +614,7 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
 
     tem_operacao_cod = False
     tem_macro_telecontrole = False
+    todos_executores_regiao = len(items) > 0
 
     for mi in items:
         if isinstance(mi, dict):
@@ -628,20 +629,28 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
             execut = mi.get('executor', '').upper()
             if re.search(r'\bCOD\b', execut):
                 tem_operacao_cod = True
+                todos_executores_regiao = False
+            elif not any(r in execut for r in ['REGIAO', 'REGIÃO', 'CAMPO', 'EQUIPE']):
+                todos_executores_regiao = False
             
-            if re.search(r'\b\d*(MA64|MA65|MA14|MA15|MA16|MA17|MA52)\b', txt_mi):
+            if re.search(r'\b\d*(MA64|MA65|MA14|MA15|MA16|MA17|MA52|MA79)\b', txt_mi):
                 tem_macro_telecontrole = True
 
     # Se há operação remota executada pelo COD ou macros explícitas de telecontrole, é telecontrolado
     if tem_operacao_cod or tem_macro_telecontrole:
         return True
 
+    # Se operado exclusivamente no campo (Região/Equipe) sem macros de automação (MA64/MA79)
+    # e sem indicação de telecontrole no cadastro, não assume telecontrolado para religadores de linha (19, 20, 22)
+    if todos_executores_regiao and prefixo in ["19", "20", "22"] and not tem_macro_telecontrole:
+        return False
+
     # Classificação padrão por prefixo do equipamento
     # Subestação (21, 23), Reguladores (02), Religadores de Linha Trifásicos (19, 20, 22): Telecontrolados por padrão
     return prefixo in ["02", "19", "20", "21", "22", "23"]
 
 
-def validar_regra_44(manobra_dados):
+def validar_regra_44(manobra_dados, dados_equipamentos=None):
     """
     Valida a Regra 44 (Sequência de Manobra com Pique e Pique Risco Sistema, CP:xx, MA27 e MA79).
     Retorna uma lista de strings contendo as falhas detectadas (vazia se OK).
@@ -651,7 +660,12 @@ def validar_regra_44(manobra_dados):
     macros_fechamento_pique = re.compile(r'\b(MA02|MA66|MA67)\b(?!\s*-\s*OUTROS)')
 
     def _is_eq_telecontrolado(eq_nome, mi=None):
-        return _verificar_telecontrole(eq_nome, manobra_items=[mi] if mi else None)
+        eq_data = None
+        if dados_equipamentos and eq_nome:
+            alim_m = (mi.get('alim') or mi.get('alimentador', '')) if mi else ''
+            local_m = (mi.get('local') or '') if mi else ''
+            eq_data = _get_eq_data(dados_equipamentos, eq_nome, alim_m, '', local_m)
+        return _verificar_telecontrole(eq_nome, eq_data=eq_data, manobra_items=[mi] if mi else None)
 
     etapas_pique = {}
 
@@ -732,7 +746,7 @@ def validar_regra_44(manobra_dados):
         txt_etapa_todas = " ".join((mi.get('acao_bruta', '') + " " + mi.get('texto_linha', '') + " " + mi.get('observacao', '')).upper() for mi in itens_etapa)
         tem_ma79_etapa = bool(re.search(r'\bMA79\b', txt_etapa_todas) or ("CONFIRMAR EQUIPAMENTO COMUNICANDO" in txt_etapa_todas))
 
-        has_tele = any(it['is_tele'] for it in itens_com_carga) or any(_is_eq_telecontrolado(mi.get('equipamento', '') or mi.get('alimentador', ''), mi) for mi in itens_etapa if (mi.get('equipamento') or '').strip())
+        has_tele = any(it['is_tele'] for it in itens_com_carga) or any(_is_eq_telecontrolado(str(mi.get('equipamento', '')).strip(), mi) for mi in itens_etapa if str(mi.get('equipamento', '')).strip())
         if has_tele and not tem_ma79_etapa:
             falhas_r44.append(f"Etapa '{etapa_nome_real}': Etapa de Manobra com Pique com equipamento telecontrolado exige a macro MA79 (Confirmar Equipamento Comunicando).")
 
@@ -3427,7 +3441,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 if not tem_pique:
                     print_regra(44, "OK", "Nenhuma etapa de Manobra com Pique detectada.")
                 else:
-                    falhas_r44 = validar_regra_44(manobra_dados)
+                    falhas_r44 = validar_regra_44(manobra_dados, dados_equipamentos=dados_equipamentos)
                     if falhas_r44:
                         for f in falhas_r44: print_regra(44, "ERRO", f)
                     else:

@@ -186,6 +186,74 @@ class TestRegra44(unittest.TestCase):
         f2 = validar_regra_44(m2)
         self.assertTrue(any("CP:1200 >= 500 exige canal 'VOZ' ou 'SATELITAL'" in f for f in f2))
 
+    def test_regra_44_religador_manual_regiao_sem_ma79(self):
+        """Garante que religador manual operado em campo pela Região NÃO exige MA79, mas exige MA27"""
+        manobra_dados = [
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '22 - 333333', 'executor': 'REGIAO',
+                'acao_bruta': '10 MA27 - POSICIONAR PARA MANOBRAR',
+                'texto_linha': '10 MA27 - POSICIONAR PARA MANOBRAR 22 - 333333'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '22 - 333333', 'executor': 'REGIAO',
+                'acao_bruta': '20 MA01 - ABRIR EQUIPAMENTO',
+                'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 22 - 333333'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '28 - 444444', 'executor': 'REGIAO',
+                'acao_bruta': '30 MA27 - POSICIONAR PARA MANOBRAR',
+                'texto_linha': '30 MA27 - POSICIONAR PARA MANOBRAR 28 - 444444'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '28 - 444444', 'executor': 'REGIAO',
+                'acao_bruta': '40 MA02 - FECHAR EQUIPAMENTO',
+                'texto_linha': '40 MA02 - FECHAR EQUIPAMENTO 28 - 444444'
+            }
+        ]
+        falhas = validar_regra_44(manobra_dados)
+        self.assertFalse(any("MA79" in f for f in falhas), f"Religador manual não deve exigir MA79: {falhas}")
+        self.assertEqual(falhas, [], f"Não deveria haver nenhuma falha para etapa manual com MA27: {falhas}")
+
+    def test_regra_44_religador_manual_gdis_sem_ma79(self):
+        """Garante que cadastro GDIS indicando telecontrolado=False isenta religador de MA79"""
+        manobra_dados = [
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '22 - 555555', 'executor': 'REGIAO', 'alim': 'ALIM1',
+                'acao_bruta': '10 MA27 - POSICIONAR PARA MANOBRAR',
+                'texto_linha': '10 MA27 - POSICIONAR PARA MANOBRAR 22 - 555555'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '22 - 555555', 'executor': 'REGIAO', 'alim': 'ALIM1',
+                'acao_bruta': '20 MA01 - ABRIR EQUIPAMENTO',
+                'texto_linha': '20 MA01 - ABRIR EQUIPAMENTO 22 - 555555'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '28 - 666666', 'executor': 'REGIAO', 'alim': 'ALIM1',
+                'acao_bruta': '30 MA27 - POSICIONAR PARA MANOBRAR',
+                'texto_linha': '30 MA27 - POSICIONAR PARA MANOBRAR 28 - 666666'
+            },
+            {
+                'etapa_texto_header': '20 MANOBRA COM PIQUE CP:100 - DADOS',
+                'equipamento': '28 - 666666', 'executor': 'REGIAO', 'alim': 'ALIM1',
+                'acao_bruta': '40 MA02 - FECHAR EQUIPAMENTO',
+                'texto_linha': '40 MA02 - FECHAR EQUIPAMENTO 28 - 666666'
+            }
+        ]
+        dados_equipamentos = {
+            '22 - 555555': [{'numero': '555555', 'telecontrolado': False, 'alimentadores': ['ALIM1']}]
+        }
+        falhas = validar_regra_44(manobra_dados, dados_equipamentos=dados_equipamentos)
+        self.assertFalse(any("MA79" in f for f in falhas), f"Religador com telecontrolado=False no GDIS não deve exigir MA79: {falhas}")
+        self.assertEqual(falhas, [], f"Não deveria haver nenhuma falha: {falhas}")
+
+
 
 if __name__ == '__main__':
     unittest.main()
