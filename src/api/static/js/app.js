@@ -1135,6 +1135,44 @@ function parseMultiManobraLog(log) {
     return blocks;
 }
 
+function getErrorItemKey(manobra, text) {
+    let hash = 0;
+    const str = `${manobra}_${text}`;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return `cm_chk_${manobra}_${Math.abs(hash)}`;
+}
+
+window.toggleErrorItemCheck = function(checkbox, key) {
+    const isChecked = checkbox.checked;
+    try {
+        if (isChecked) {
+            localStorage.setItem(key, 'true');
+        } else {
+            localStorage.removeItem(key);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    const itemContainer = checkbox.closest('.rule-item');
+    if (itemContainer) {
+        const textSpan = itemContainer.querySelector('.rule-text');
+        if (textSpan) {
+            textSpan.style.textDecoration = isChecked ? 'line-through' : 'none';
+            textSpan.style.opacity = isChecked ? '0.5' : '1';
+        }
+        const badge = itemContainer.querySelector('.cm-status-tag');
+        if (badge) {
+            badge.textContent = isChecked ? 'Tratado' : 'Pendente';
+            badge.style.color = isChecked ? 'var(--accent)' : 'var(--text-muted)';
+            badge.style.borderColor = isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)';
+            badge.style.background = isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent';
+        }
+    }
+};
+
 function analyzeManobraBlock(block) {
     const lines = block.log.split('\n');
     let currentPhase = null;
@@ -1165,20 +1203,30 @@ function analyzeManobraBlock(block) {
                 stats.fail++;
                 let text = escapeHtml(l.replace(/❌|FALHA|===/g, '').trim());
                 text = text.replace(/(REGRA\s*\d+)/gi, '<b>$1</b>').replace(/:\s*:/g, ':').trim();
+                const itemKey = getErrorItemKey(block.manobra, text);
+                let isChecked = false;
+                try { isChecked = localStorage.getItem(itemKey) === 'true'; } catch(e) {}
                 ruleItems.push(`
-                    <div class="rule-item" style="display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <div class="rule-item" style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <input type="checkbox" onchange="window.toggleErrorItemCheck(this, '${itemKey}')" ${isChecked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Marcar como tratado">
                         <span style="font-size:16px;">❌</span>
-                        <span style="font-size:13px; color:var(--danger); font-weight:500; line-height:1.4;">${text}</span>
+                        <span class="rule-text" style="flex:1; font-size:13px; color:var(--danger); font-weight:500; line-height:1.4; ${isChecked ? 'text-decoration:line-through; opacity:0.5;' : ''}">${text}</span>
+                        <span class="cm-status-tag" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid ${isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}; color:${isChecked ? 'var(--accent)' : 'var(--text-muted)'}; background:${isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};">${isChecked ? 'Tratado' : 'Pendente'}</span>
                     </div>
                 `);
             } else if (isWarn) {
                 stats.warn++;
                 let text = escapeHtml(l.replace(/⚠️|ALERTA|===/g, '').trim());
                 text = text.replace(/(REGRA\s*\d+)/gi, '<b>$1</b>').replace(/:\s*:/g, ':').trim();
+                const itemKey = getErrorItemKey(block.manobra, text);
+                let isChecked = false;
+                try { isChecked = localStorage.getItem(itemKey) === 'true'; } catch(e) {}
                 ruleItems.push(`
-                    <div class="rule-item" style="display:flex; align-items:flex-start; gap:12px; padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <div class="rule-item" style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+                        <input type="checkbox" onchange="window.toggleErrorItemCheck(this, '${itemKey}')" ${isChecked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Marcar como tratado">
                         <span style="font-size:16px;">⚠️</span>
-                        <span style="font-size:13px; color:var(--warn); font-weight:500; line-height:1.4;">${text}</span>
+                        <span class="rule-text" style="flex:1; font-size:13px; color:var(--warn); font-weight:500; line-height:1.4; ${isChecked ? 'text-decoration:line-through; opacity:0.5;' : ''}">${text}</span>
+                        <span class="cm-status-tag" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid ${isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}; color:${isChecked ? 'var(--accent)' : 'var(--text-muted)'}; background:${isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};">${isChecked ? 'Tratado' : 'Pendente'}</span>
                     </div>
                 `);
             }
