@@ -768,6 +768,44 @@ async function pollConf() {
     }
 }
 
+function getConflictItemKey(base, target, type) {
+    let hash = 0;
+    const str = `${base}_${target}_${type}`;
+    for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return `conf_chk_${base}_${Math.abs(hash)}`;
+}
+
+window.toggleConflictItemCheck = function(checkbox, key) {
+    const isChecked = checkbox.checked;
+    try {
+        if (isChecked) {
+            localStorage.setItem(key, 'true');
+        } else {
+            localStorage.removeItem(key);
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    const row = checkbox.closest('tr');
+    if (row) {
+        row.style.opacity = isChecked ? '0.5' : '1';
+        const targetText = row.querySelector('.conf-target');
+        if (targetText) {
+            targetText.style.textDecoration = isChecked ? 'line-through' : 'none';
+        }
+        const badge = row.querySelector('.conf-status-tag');
+        if (badge) {
+            badge.textContent = isChecked ? 'Tratado' : 'Pendente';
+            badge.style.color = isChecked ? 'var(--accent)' : 'var(--text-muted)';
+            badge.style.borderColor = isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)';
+            badge.style.background = isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent';
+        }
+    }
+};
+
 function showConfResults(data) {
     document.getElementById('btn-conf-start').classList.remove('btn-loading');
     document.getElementById('conf-skeleton').classList.remove('active');
@@ -867,12 +905,14 @@ function showConfResults(data) {
                     <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px;">
                         <thead>
                             <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--text-muted);">
+                                <th style="padding: 8px 10px; width: 40px; text-align: center;">Tratar</th>
                                 <th style="padding: 8px 10px;">Manobra Conflitante</th>
                                 <th style="padding: 8px 10px;">Data</th>
                                 <th style="padding: 8px 10px;">Situação</th>
                                 <th style="padding: 8px 10px;">Tipo Conflito</th>
                                 <th style="padding: 8px 10px;">Equipamentos</th>
                                 <th style="padding: 8px 10px;">Alimentadores</th>
+                                <th style="padding: 8px 10px; text-align: center;">Status</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -886,14 +926,20 @@ function showConfResults(data) {
                                 const typeColor = isInterno ? 'var(--warn)' : 'var(--danger)';
                                 const typeLabel = c.tipo_conflito || 'CONFLITO';
 
+                                const confKey = getConflictItemKey(mBase, c.manobra || 'interno', typeLabel);
+                                let isChecked = false;
+                                try { isChecked = localStorage.getItem(confKey) === 'true'; } catch (e) {}
+
                                 return `
-                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                    <td style="padding: 8px 10px;"><b>${c.manobra}</b></td>
+                                <tr class="conf-item-row" style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: opacity 0.2s; ${isChecked ? 'opacity: 0.5;' : ''}">
+                                    <td style="padding: 8px 10px; text-align: center;"><input type="checkbox" onchange="window.toggleConflictItemCheck(this, '${confKey}')" ${isChecked ? 'checked' : ''} style="cursor: pointer; width: 16px; height: 16px; accent-color: var(--accent);" title="Marcar como tratado"></td>
+                                    <td style="padding: 8px 10px;"><b class="conf-target" style="${isChecked ? 'text-decoration: line-through;' : ''}">${c.manobra}</b></td>
                                     <td style="padding: 8px 10px;"><span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">📅 ${c.data_manobra || info.data_inicio || '-'}</span></td>
                                     <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${sitBg}; color: ${sitColor}; border-radius: 4px; font-weight: 600;">${sitLabel}</span></td>
                                     <td style="padding: 8px 10px;"><span style="font-size: 11px; padding: 2px 6px; background: ${typeBg}; color: ${typeColor}; border-radius: 4px; font-weight: 600;">${typeLabel}</span></td>
                                     <td style="padding: 8px 10px;">${(c.equipamentos || []).join('; ') || '-'}</td>
                                     <td style="padding: 8px 10px;">${(c.alimentadores || []).join('; ') || '-'}</td>
+                                    <td style="padding: 8px 10px; text-align: center;"><span class="conf-status-tag" style="font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid ${isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}; color: ${isChecked ? 'var(--accent)' : 'var(--text-muted)'}; background: ${isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};">${isChecked ? 'Tratado' : 'Pendente'}</span></td>
                                 </tr>
                                 `;
                             }).join('')}
@@ -945,11 +991,16 @@ function showConfResults(data) {
         conflitosInternos.forEach(c => {
             const tr = document.createElement('tr');
             tr.style.background = 'rgba(245, 158, 11, 0.05)';
+            tr.style.transition = 'opacity 0.2s';
             const orig = escapeHtml(c.origem);
             const dest = escapeHtml(c.destino);
             const eq = escapeHtml((c.equipamentos || []).join('; '));
             const al = escapeHtml((c.alimentadores || []).join('; '));
-            tr.innerHTML = `<td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td>${orig} vs ${dest}</td><td>${eq}</td><td>${al}</td>`;
+            const confKey = getConflictItemKey('interno', `${orig}_${dest}`, 'INTERNO');
+            let isChecked = false;
+            try { isChecked = localStorage.getItem(confKey) === 'true'; } catch (e) {}
+            if (isChecked) tr.style.opacity = '0.5';
+            tr.innerHTML = `<td style="text-align:center;"><input type="checkbox" onchange="window.toggleConflictItemCheck(this, '${confKey}')" ${isChecked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Marcar como tratado"></td><td><span style="color:var(--warn)">⚠️ INTERNO</span></td><td class="conf-target" style="${isChecked ? 'text-decoration:line-through;' : ''}">${orig} vs ${dest}</td><td>${eq}</td><td>${al}</td><td style="text-align:center;"><span class="conf-status-tag" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid ${isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}; color:${isChecked ? 'var(--accent)' : 'var(--text-muted)'}; background:${isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};">${isChecked ? 'Tratado' : 'Pendente'}</span></td>`;
             tbody.appendChild(tr);
         });
     }
@@ -957,11 +1008,16 @@ function showConfResults(data) {
     if (conflitosGlobais.length > 0) {
         conflitosGlobais.forEach(c => {
             const tr = document.createElement('tr');
+            tr.style.transition = 'opacity 0.2s';
             const man = escapeHtml(c.manobra);
             const sit = escapeHtml((c.situacoes || []).join(', '));
             const eq = escapeHtml((c.equipamentos || []).join('; '));
             const al = escapeHtml((c.alimentadores || []).join('; '));
-            tr.innerHTML = `<td><b>${man}</b></td><td>${sit}</td><td>${eq}</td><td>${al}</td>`;
+            const confKey = getConflictItemKey('global', man, sit);
+            let isChecked = false;
+            try { isChecked = localStorage.getItem(confKey) === 'true'; } catch (e) {}
+            if (isChecked) tr.style.opacity = '0.5';
+            tr.innerHTML = `<td style="text-align:center;"><input type="checkbox" onchange="window.toggleConflictItemCheck(this, '${confKey}')" ${isChecked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px; accent-color:var(--accent);" title="Marcar como tratado"></td><td><b class="conf-target" style="${isChecked ? 'text-decoration:line-through;' : ''}">${man}</b></td><td>${sit}</td><td>${eq}</td><td>${al}</td><td style="text-align:center;"><span class="conf-status-tag" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid ${isChecked ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}; color:${isChecked ? 'var(--accent)' : 'var(--text-muted)'}; background:${isChecked ? 'rgba(16, 185, 129, 0.1)' : 'transparent'};">${isChecked ? 'Tratado' : 'Pendente'}</span></td>`;
             tbody.appendChild(tr);
         });
     }
