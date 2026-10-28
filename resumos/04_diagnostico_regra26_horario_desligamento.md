@@ -1,4 +1,4 @@
-# Diagnóstico e Solução: Regra 26 (Horário de Desligamento na Manobra 245738775)
+# Diagnóstico e Implementação: Regra 26 (Horário de Desligamento na Manobra 245738775)
 
 ## 1. Problema Apontado
 Na manobra `245738775`, o conferidor aprovou o cronograma ("tudo correto"), apesar de o horário de Desligamento na Manobra divergir da Solicitação:
@@ -7,27 +7,31 @@ Na manobra `245738775`, o conferidor aprovou o cronograma ("tudo correto"), apes
 
 ## 2. Causa Raiz Identificada no Código (`src/core/conferidor_manobras.py`)
 1. **Verificação Unidirecional de Início na Regra 26**:
-   Nas linhas 2178-2180, o conferidor apenas acusa falha se o início for **antecipado** (`ini_man_ref < sol_ini_ref`):
-   ```python
-   if ini_man_ref < sol_ini_ref:
-       falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
-   ```
-   Quando o Desligamento na manobra ocorre **mais tarde** que a solicitação (12:00 > 11:00), a condição é falsa e o atraso/divergência é ignorado silenciosamente.
+   Nas linhas 2178-2180, o conferidor apenas acusava falha se o início fosse **antecipado** (`ini_man_ref < sol_ini_ref`). Quando o desligamento ocorria **mais tarde** que a solicitação (12:00 > 11:00), a condição era falsa e o atraso era ignorado silenciosamente.
 2. **Cálculo de `horarios_deslig` cego a etapas prévias**:
-   O cálculo de `horarios_deslig` exige que a etapa contenha a palavra `"DESLIGAMENTO"` no título (linha 2137). O equipamento da solicitação `24 - 198574` foi aberto com `MA31` na **Etapa 20 (11:00)** e não consta na Etapa 30, resultando em `horarios_deslig = []` e contornando a checagem de início para este equipamento.
+   O cálculo de `horarios_deslig` exigia que a etapa contivesse a palavra `"DESLIGAMENTO"` no título. O equipamento da solicitação `24 - 198574` foi aberto com `MA31` na **Etapa 20 (11:00)** e não constava na Etapa 30, resultando em `horarios_deslig = []` e contornando a checagem de início para este equipamento.
 3. **Ausência de Validação do Cabeçalho Global da Etapa de Desligamento**:
-   Não há validação direta entre o horário do cabeçalho da etapa `DESLIGAMENTO` e o campo `Data Início` da solicitação.
+   Não havia checagem direta entre o horário do cabeçalho da etapa `DESLIGAMENTO` e o campo `Data Início` da solicitação.
 
-## 3. Análise de Impacto nas Demais Regras
-- **Regra 26**: Passará a alertar/acusar divergência quando o início do desligamento for postergado (`ini > sol_ini`), garantindo alinhamento exato entre a autorização e a execução da manobra.
-- **Regra 25 (Variação de horários)**: Inalterada.
-- **Regras 42 e 02 (Abertura até desligamento)**: Inalteradas, pois utilizam `_obter_limite_pre_desligamento`.
-- **Regras 44, 45, 46**: Inalteradas (sem relação com cronograma de solicitação).
+## 3. Implementação Realizada
 
-## 4. Solução Proposta (Aguardando Autorização)
-1. **Validação Bidirecional na Regra 26**:
-   Acusar `Início postergado / divergente ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})` quando `ini_man_ref > sol_ini_ref`.
-2. **Checagem de Desligamento Global**:
-   Validar o cabeçalho da etapa `DESLIGAMENTO` diretamente contra `dt_sol_ini`. Se divergir, emitir apontamento na Regra 26.
-3. **Considerar Aberturas de Delimitação**:
-   Para equipamentos listados nos `Locais de Interrupção`, considerar como início operativo a primeira etapa de abertura com `MA01`/`MA31` caso ocorra antes da etapa formal de desligamento.
+### `src/core/conferidor_manobras.py`
+1. **Validação Global do Cabeçalho de Desligamento**:
+   - Adicionada verificação direta antes do laço por equipamento confrontando o horário do cabeçalho da etapa `DESLIGAMENTO` contra `dt_sol_ini`.
+   - Emite `ERRO` para início antecipado ou início divergente/postergado (`ini > sol_ini`).
+   - Emite `ALERTA` para data programada em dia diferente da solicitação.
+2. **Validação Bidirecional por Equipamento**:
+   - Incluída a condição `elif ini_man_ref > sol_ini_ref:` gerando a falha:
+     `Início divergente/postergado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})`.
+3. **Detecção de Abertura em Equipamentos da Solicitação**:
+   - No cálculo de `horarios_deslig`, se o equipamento for da solicitação (`info_sol`) e possuir macro de abertura (`MA01`, `MA31`, `MA30`), o horário dessa etapa passa a compor o início da interrupção do equipamento, mesmo fora da etapa formal de desligamento.
+
+### `tests/unit/test_regra26_cronograma.py`
+- Atualizada função `simular_regra_26` para refletir a validação bidirecional.
+- Adicionado teste `test_regra26_detecta_inicio_postergado_real`.
+- Adicionado teste `test_regra26_cenario_manobra_245738775` reproduzindo exatamente o caso da manobra 245738775 e comprovando a detecção da divergência das 12:00 vs 11:00.
+
+## 4. Resultados dos Testes
+- Suíte `test_regra26_cronograma.py`: 6/6 aprovados via `pytest`.
+- Suíte unitária global: 48/48 testes aprovados (`Ran 48 tests in 0.211s - OK`).
+- Linter: `ruff check` 100% aprovado sem pendências.

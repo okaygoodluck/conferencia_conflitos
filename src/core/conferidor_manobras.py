@@ -2118,9 +2118,33 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                 if not dt_sol_ini and not any(sol_dict.values()):
                     print_regra(26, "ALERTA", "Solicitação: Falha na leitura dos horários autorizados. Verifique manualmente o cronograma.")
 
+                # Validação Global do Cabeçalho da Etapa de Desligamento
+                etapa_deslig_dt = None
+                etapa_deslig_nome = ""
+                for mi in manobra_dados:
+                    et_full = (str(mi.get('etapa_nome', '')) + ' ' + str(mi.get('etapa_texto_header', ''))).upper()
+                    if "DESLIGAMENTO" in et_full and "RELIGAMENTO" not in et_full:
+                        m_dt_deslig = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', mi.get('etapa_texto_header', ''))
+                        if m_dt_deslig:
+                            dt_parsed = parse_dt(m_dt_deslig.group(1))
+                            if dt_parsed:
+                                etapa_deslig_dt = dt_parsed
+                                etapa_deslig_nome = _obter_nome_etapa(mi)
+                                break
+
+                if dt_sol_ini and etapa_deslig_dt:
+                    if etapa_deslig_dt.time() < dt_sol_ini.time():
+                        print_regra(26, "ERRO", f"Etapa '{etapa_deslig_nome}': Início antecipado ({etapa_deslig_dt.strftime('%H:%M')}) vs Autorizado na Solicitação ({dt_sol_ini.strftime('%H:%M')}).")
+                    elif etapa_deslig_dt.time() > dt_sol_ini.time():
+                        print_regra(26, "ERRO", f"Etapa '{etapa_deslig_nome}': Horário de Desligamento divergente/postergado ({etapa_deslig_dt.strftime('%H:%M')}) vs Autorizado na Solicitação ({dt_sol_ini.strftime('%H:%M')}).")
+                    elif etapa_deslig_dt.date() != dt_sol_ini.date():
+                        print_regra(26, "ALERTA", f"Etapa '{etapa_deslig_nome}': Data programada ({etapa_deslig_dt.strftime('%d/%m/%Y')}) difere da data da solicitação ({dt_sol_ini.strftime('%d/%m/%Y')}).")
+
                 for eq, items in manobra_map.items():
                     todos_horarios_validos = []
                     horarios_deslig = []
+                    info_sol = sol_dict.get(eq)
+                    is_apoio = (info_sol is None)
         
                     for mi in items:
                         dt_str = mi.get('etapa_texto_header', '')
@@ -2134,7 +2158,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             dt_obj = parse_dt(m_dt.group(1))
                             if dt_obj and not is_preparacao:
                                 todos_horarios_validos.append(dt_obj)
-                                if "DESLIGAMENTO" in etapa_full:
+                                if "DESLIGAMENTO" in etapa_full or info_sol and any(re.search(r'\b\d*' + m + r'\b', mi.get('texto_linha', ''), re.IGNORECASE) for m in ["MA01", "MA31", "MA30"]):
                                     horarios_deslig.append(dt_obj)
         
                     if not todos_horarios_validos: continue
@@ -2144,9 +2168,6 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
         
                     lim_ini = dt_sol_ini
                     lim_fim = dt_sol_fim
-        
-                    info_sol = sol_dict.get(eq)
-                    is_apoio = (info_sol is None)
         
                     if info_sol:
                         dt_indiv_ini = parse_dt(info_sol.get('inicio', ''))
@@ -2175,9 +2196,11 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                         else:
                             fim_man_ref = datetime.combine(data_ref, fim_man.time())
 
-                        # Valida antecipação do desligamento
+                        # Valida antecipação ou postergação do desligamento
                         if ini_man_ref < sol_ini_ref:
                             falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
+                        elif ini_man_ref > sol_ini_ref:
+                            falhas_r26.append(f"Início divergente/postergado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
 
                         # Valida término tardio
                         if fim_man_ref > sol_fim_ref:
@@ -2190,6 +2213,8 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     elif lim_ini and ini_man_real:
                         if ini_man_real.time() < lim_ini.time():
                             falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
+                        elif ini_man_real.time() > lim_ini.time():
+                            falhas_r26.append(f"Início divergente/postergado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
                     elif lim_fim and fim_man:
                         if fim_man.time() > lim_fim.time():
                             falhas_r26.append(f"Término tardio ({fim_man.strftime('%H:%M')}) vs Autorizado ({lim_fim.strftime('%H:%M')})")

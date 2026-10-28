@@ -75,6 +75,8 @@ def simular_regra_26(manobra_map, dt_sol_ini_str, dt_sol_fim_str, sol_dict=None)
 
             if ini_man_ref < sol_ini_ref:
                 falhas_r26.append(f"Início antecipado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
+            elif ini_man_ref > sol_ini_ref:
+                falhas_r26.append(f"Início divergente/postergado ({ini_man_real.strftime('%H:%M')}) vs Autorizado ({lim_ini.strftime('%H:%M')})")
 
             if fim_man_ref > sol_fim_ref:
                 falhas_r26.append(f"Término tardio ({fim_man.strftime('%H:%M')}) vs Autorizado ({lim_fim.strftime('%H:%M')})")
@@ -171,3 +173,48 @@ def test_regra26_manobra_noturna():
 
     res = simular_regra_26(manobra_map, "23/09/2026 22:00", "24/09/2026 04:00")
     assert len(res["24 - 1313"]["falhas"]) == 0
+
+def test_regra26_detecta_inicio_postergado_real():
+    """Detecta início postergado quando o desligamento começa após o horário autorizado."""
+    manobra_map = {
+        "24 - 1313": [
+            {
+                "etapa_nome": "40 DESLIGAMENTO",
+                "etapa_texto_header": "40 DESLIGAMENTO 23/09/2026 12:00"
+            },
+            {
+                "etapa_nome": "50 RELIGAMENTO",
+                "etapa_texto_header": "50 RELIGAMENTO 23/09/2026 17:00"
+            }
+        ]
+    }
+
+    res = simular_regra_26(manobra_map, "23/09/2026 11:00", "23/09/2026 17:00")
+    assert len(res["24 - 1313"]["falhas"]) == 1
+    assert "Início divergente/postergado (12:00) vs Autorizado (11:00)" in res["24 - 1313"]["falhas"][0]
+
+
+def test_regra26_cenario_manobra_245738775():
+    """
+    Cenário da Manobra 245738775:
+    - Solicitação: 21/09/2026 11:00 às 21/09/2026 15:00
+    - Manobra: Desligamento às 12:00 e Religamento às 15:00
+    Deve acusar falha de início divergente/postergado às 12:00.
+    """
+    manobra_map = {
+        "22 - 481391": [
+            {
+                "etapa_nome": "30 DESLIGAMENTO PRSU012 21/09/2026 12:00",
+                "etapa_texto_header": "30 DESLIGAMENTO PRSU012 21/09/2026 12:00"
+            },
+            {
+                "etapa_nome": "40 RELIGAMENTO PRSU012 21/09/2026 15:00",
+                "etapa_texto_header": "40 RELIGAMENTO PRSU012 21/09/2026 15:00"
+            }
+        ]
+    }
+
+    res = simular_regra_26(manobra_map, "21/09/2026 11:00", "21/09/2026 15:00")
+    assert len(res["22 - 481391"]["falhas"]) == 1
+    assert "Início divergente/postergado (12:00) vs Autorizado (11:00)" in res["22 - 481391"]["falhas"][0]
+
