@@ -1,4 +1,4 @@
-# Análise: Manobra 246726602 (Regra 12 - Posicionamento na Macro MA66)
+# Análise e Implementação: Manobra 246726602 (Regra 12 - Posicionamento na Macro MA66)
 
 ## 1. Problema Relatado
 O usuário questionou o apontamento de erro da Regra 12 na Manobra 246726602:
@@ -17,10 +17,21 @@ Ao inspecionar os 56 itens da manobra, o equipamento `28 - 89080` sofre duas ope
    - Texto: `40 MA66 - RETIRAR SINALIZACAO E FECHAR EQUIPAMENTO 28 - 89080 ... REGIAO NÃO`
    - Posicionamento: `NÃO` (Inválido).
 
-## 3. Conclusão
 O apontamento do Conferidor é **correto e legítimo**. Não se trata de falso positivo. A macro `MA66` (Etapa 90, Item 4) está com `Pos: Não`.
 
-## 4. Melhoria Proposta de Usabilidade (Aguardando Autorização)
-Na Regra 12 de `src/core/conferidor_manobras.py`, incluir o nome da etapa e/ou linha na mensagem de erro para evitar que o operador confunda operações de abertura (Etapa 20) com operações de fechamento (Etapa 90) no mesmo equipamento:
-- *Formato atual*: `Equipamento '28 - 89080': Operação pela Região (MA66) exige marcar 'SIM' na coluna Posicionamento.`
-- *Formato aprimorado*: `Etapa '90' - Equipamento '28 - 89080': Operação pela Região (MA66) exige marcar 'SIM' na coluna Posicionamento.`
+## 3. Implementação da Melhoria de Usabilidade
+Para evitar que operadores confundam operações de abertura com operações de fechamento do mesmo equipamento, a Regra 12 foi aprimorada:
+
+### `src/core/conferidor_manobras.py`
+- Modularizada a função `validar_regra_12(eq, manobra_items, prefixo="", is_manobra_terceiros=False)` no escopo do módulo.
+- A mensagem de erro agora agrupa e referencia explicitamente a etapa correspondente de cada ocorrência:
+  - *Exemplo*: `Equipamento '28 - 89080': Operação pela Região em [Etapa '90 MANOBRA COM RISCO SISTEMA PRRU015' (MA66)] exige marcar 'SIM' na coluna Posicionamento.`
+
+### `tests/unit/test_regra_12.py`
+- Criado teste unitário `test_regra_12_manobra_246726602_cenario` replicando exatamente o caso da manobra 246726602 e confirmando o apontamento preciso na Etapa 90.
+- Criado teste `test_regra_12_valida_quando_todos_posicionados` garantindo status `OK` quando todas as etapas estão com `SIM`.
+- Criado teste `test_regra_12_isenta_etapa_pique` confirmando isenção de Posicionamento para etapas com Pique (que utilizam MA27).
+
+## 4. Resultados dos Testes
+- Suíte unitária: 48/48 testes aprovados (`Ran 48 tests in 0.233s - OK`).
+- Linter: `ruff check` 100% aprovado sem apontamentos.

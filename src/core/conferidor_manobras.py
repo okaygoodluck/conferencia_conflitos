@@ -650,6 +650,58 @@ def _verificar_telecontrole(eq_nome, eq_data=None, manobra_items=None, sol_info=
     return prefixo in ["02", "19", "20", "21", "22", "23"]
 
 
+def validar_regra_12(eq, manobra_items, prefixo="", is_manobra_terceiros=False):
+    """
+    Valida a Regra 12 (Posicionamento / POS. MANOBRAR obrigatório para operação local pela Região).
+    Retorna tupla: (status, mensagem, teve_operacao_regiao)
+    """
+    macros_operacao = ["MA01", "MA02", "MA31", "MA66", "MA30", "MA67"]
+    falhas_12 = []
+    teve_operacao_regiao = False
+    tem_mab9 = any(re.search(r'\b\d*MAB9\b', mi.get('texto_linha', ''), re.IGNORECASE) for mi in manobra_items)
+
+    for mi in manobra_items:
+        etapa_nome = mi.get('etapa_nome', '').upper()
+        etapa_header = mi.get('etapa_texto_header', '').upper()
+        if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
+            continue
+
+        execut = mi.get('executor', '').upper()
+        posic = str(mi.get('posicionamento', '')).strip().upper()
+        pos_obrigatorio = (posic in ['SIM', 'S', 'TRUE', '1'])
+
+        is_execut_regiao = ('REGIAO' in execut or 'REGIÃO' in execut)
+
+        if is_execut_regiao:
+            for m_op in macros_operacao:
+                if re.search(r'\b\d*' + m_op + r'\b', mi.get('texto_linha', ''), re.IGNORECASE):
+                    teve_operacao_regiao = True
+                    if prefixo != "02" and not pos_obrigatorio and not tem_mab9:
+                        nome_et = _obter_nome_etapa(mi)
+                        falhas_12.append((nome_et, m_op.upper()))
+
+    if falhas_12:
+        etapas_map = {}
+        for n_et, m_cod in falhas_12:
+            etapas_map.setdefault(n_et, []).append(m_cod)
+        detalhes = [f"Etapa '{n_et}' ({', '.join(sorted(set(ms)))})" for n_et, ms in etapas_map.items()]
+        str_detalhes = "; ".join(detalhes)
+        if is_manobra_terceiros:
+            return "ALERTA", f"Equipamento '{eq}': Operação pela Região em [{str_detalhes}] em Manobra de Terceiros sem a coluna Posicionamento marcada como 'SIM'.", teve_operacao_regiao
+        else:
+            return "ERRO", f"Equipamento '{eq}': Operação pela Região em [{str_detalhes}] exige marcar 'SIM' na coluna Posicionamento.", teve_operacao_regiao
+
+    if teve_operacao_regiao:
+        if prefixo == "02":
+            return "OK", f"Equipamento '{eq}' (Regulador de Tensão) operado corretamente: telecontrole restrito aos TAPs.", teve_operacao_regiao
+        elif not tem_mab9:
+            return "OK", "Operação pela Região validada com POS. MANOBRAR / Posicionamento = SIM.", teve_operacao_regiao
+        elif tem_mab9:
+            return "OK", "Exceção validada: macro MAB9 justifica a ausência de telecontrole/posicionamento.", teve_operacao_regiao
+
+    return None, "", teve_operacao_regiao
+
+
 def validar_regra_44(manobra_dados, dados_equipamentos=None):
     """
     Valida a Regra 44 (Sequência de Manobra com Pique e Pique Risco Sistema, CP:xx, MA27 e MA79).
@@ -2825,45 +2877,17 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                     else:
                         pass  # IGNORADA silenciosa
 
-                    # REGRA 12 (Posicionamento / POS. MANOBRAR obrigatório para operação local pela Região)
-                    macros_operacao = ["MA01", "MA02", "MA31", "MA66", "MA30", "MA67"]
-                    falhas_12 = set()
-                    teve_operacao_regiao = False
-                    tem_mab9 = any(re.search(r'\b\d*MAB9\b', mi['texto_linha'], re.IGNORECASE) for mi in manobra_items)
-        
-                    for mi in manobra_items:
-                        etapa_nome = mi.get('etapa_nome', '').upper()
-                        etapa_header = mi.get('etapa_texto_header', '').upper()
-                        # Etapas de pique (MANOBRA COM PIQUE / MANOBRA C/ PIQUE RISCO SISTEMA) usam MA27 em vez de POS. MANOBRAR
-                        if "PIQUE" in etapa_nome or "PIQUE" in etapa_header:
-                            continue
+                    tem_mab9 = any(re.search(r'\b\d*MAB9\b', mi.get('texto_linha', ''), re.IGNORECASE) for mi in manobra_items)
 
-                        execut = mi['executor'].upper()
-                        posic = mi.get('posicionamento', '').upper()
-                        pos_obrigatorio = (posic in ['SIM', 'S', 'TRUE', '1'])
-            
-                        # Executor deve ser especificamente Região / Regiao
-                        is_execut_regiao = ('REGIAO' in execut or 'REGIÃO' in execut)
-            
-                        if is_execut_regiao:
-                            for m_op in macros_operacao:
-                                if re.search(r'\b\d*' + m_op + r'\b', mi['texto_linha'], re.IGNORECASE):
-                                    teve_operacao_regiao = True
-                                    if prefixo != "02" and not pos_obrigatorio and not tem_mab9:
-                                        falhas_12.add(m_op.upper())
-                    if falhas_12:
-                        str_macros = ", ".join(sorted(falhas_12))
-                        if is_manobra_terceiros:
-                            print_regra(12, "ALERTA", f"Equipamento '{eq}': Operação pela Região ({str_macros}) em Manobra de Terceiros sem a coluna Posicionamento marcada como 'SIM'.")
-                        else:
-                            print_regra(12, "ERRO", f"Equipamento '{eq}': Operação pela Região ({str_macros}) exige marcar 'SIM' na coluna Posicionamento.")
-                    elif teve_operacao_regiao:
-                        if prefixo == "02":
-                             print_regra(12, "OK", f"Equipamento '{eq}' (Regulador de Tensão) operado corretamente: telecontrole restrito aos TAPs.")
-                        elif not tem_mab9:
-                            print_regra(12, "OK", "Operação pela Região validada com POS. MANOBRAR / Posicionamento = SIM.")
-                        elif tem_mab9:
-                            print_regra(12, "OK", "Exceção validada: macro MAB9 justifica a ausência de telecontrole/posicionamento.")
+                    # REGRA 12 (Posicionamento / POS. MANOBRAR obrigatório para operação local pela Região)
+                    status_r12, msg_r12, teve_operacao_regiao = validar_regra_12(
+                        eq=eq,
+                        manobra_items=manobra_items,
+                        prefixo=prefixo,
+                        is_manobra_terceiros=is_manobra_terceiros
+                    )
+                    if status_r12:
+                        print_regra(12, status_r12, msg_r12)
                     else:
                         pass  # IGNORADA silenciosa
 

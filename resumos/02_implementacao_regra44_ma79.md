@@ -25,3 +25,4 @@ Correção de falso positivo na Regra 44 onde qualquer religador (prefixo 22, 19
 ## 3. Resultados dos Testes
 - Suíte unitária: 45/45 testes aprovados (`Ran 45 tests in 0.212s - OK`).
 - Linter: `ruff check` aprovado sem apontamentos.
+
