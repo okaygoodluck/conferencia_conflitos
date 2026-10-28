@@ -2158,7 +2158,7 @@ def main(manobra_param=None, usuario_param=None, senha_param=None, headless=Fals
                             dt_obj = parse_dt(m_dt.group(1))
                             if dt_obj and not is_preparacao:
                                 todos_horarios_validos.append(dt_obj)
-                                if "DESLIGAMENTO" in etapa_full or info_sol and any(re.search(r'\b\d*' + m + r'\b', mi.get('texto_linha', ''), re.IGNORECASE) for m in ["MA01", "MA31", "MA30"]):
+                                if "DESLIGAMENTO" in etapa_full and "PIQUE" not in etapa_full:
                                     horarios_deslig.append(dt_obj)
         
                     if not todos_horarios_validos: continue

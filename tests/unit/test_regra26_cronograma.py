@@ -34,7 +34,7 @@ def simular_regra_26(manobra_map, dt_sol_ini_str, dt_sol_fim_str, sol_dict=None)
                 dt_obj = parse_dt(m_dt.group(1))
                 if dt_obj and not is_preparacao:
                     todos_horarios_validos.append(dt_obj)
-                    if "DESLIGAMENTO" in etapa_full:
+                    if "DESLIGAMENTO" in etapa_full and "PIQUE" not in etapa_full:
                         horarios_deslig.append(dt_obj)
 
         if not todos_horarios_validos:
@@ -218,3 +218,38 @@ def test_regra26_cenario_manobra_245738775():
     assert len(res["22 - 481391"]["falhas"]) == 1
     assert "Início divergente/postergado (12:00) vs Autorizado (11:00)" in res["22 - 481391"]["falhas"][0]
 
+
+
+def test_regra26_cenario_manobra_246263155_pique():
+    """
+    Cenário da Manobra 246263155:
+    - Solicitação: 09/10/2026 11:00 às 09/10/2026 15:30
+    - Etapa 20 MANOBRA COM PIQUE às 10:00 (com MA01 de transferência)
+    - Etapa 30 DESLIGAMENTO às 11:00
+    - Etapa 40 RELIGAMENTO às 15:30
+    - Etapa 50 MANOBRA COM PIQUE às 15:30
+    Não deve gerar falha de início antecipado para o equipamento na etapa de pique.
+    """
+    manobra_map = {
+        "22 - 359169": [
+            {
+                "etapa_nome": "20 MANOBRA COM PIQUE CP:131 - DADOS BTZD206 09/10/2026 10:00",
+                "etapa_texto_header": "20 MANOBRA COM PIQUE CP:131 - DADOS BTZD206 09/10/2026 10:00",
+                "texto_linha": "40 MA01 - ABRIR EQUIPAMENTO 22 - 359169 BTZD206 - ENDERECO RURAL - 2139 COM CARGA 09/10/2026 10:00 COD NÃO"
+            },
+            {
+                "etapa_nome": "30 DESLIGAMENTO BTZD206 09/10/2026 11:00",
+                "etapa_texto_header": "30 DESLIGAMENTO BTZD206 09/10/2026 11:00",
+                "texto_linha": "30 MA06 - VERIFICAR EQUIPAMENTO ABERTO E SINALIZAR 22 - 359169 BTZD206 - ENDERECO RURAL - 2139 COM TENSAO SUPERVISOR NÃO"
+            },
+            {
+                "etapa_nome": "50 MANOBRA COM PIQUE CP:131 - DADOS BTZD206 09/10/2026 15:30",
+                "etapa_texto_header": "50 MANOBRA COM PIQUE CP:131 - DADOS BTZD206 09/10/2026 15:30",
+                "texto_linha": "50 MA02 - FECHAR EQUIPAMENTO 22 - 359169 BTZD206 - ENDERECO RURAL - 2139 COM CARGA 09/10/2026 15:30 COD NÃO"
+            }
+        ]
+    }
+    sol_dict = {"22 - 359169": {"inicio": "09/10/2026 11:00", "termino": "09/10/2026 15:30"}}
+
+    res = simular_regra_26(manobra_map, "09/10/2026 11:00", "09/10/2026 15:30", sol_dict=sol_dict)
+    assert len(res["22 - 359169"]["falhas"]) == 0
